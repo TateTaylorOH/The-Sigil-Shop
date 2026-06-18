@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Exit-9B/InventoryInjector/main/docs/InventoryInjector.schema.json",
+  "rules": [
+    {
+      "match": {
+        "formType": "MiscItem",
+        "formId": {
+          "anyOf": [
+            "Update.esm|DE5031"
+          ]
+        }
+      },
+      "assign": {
+        "subType": "Gold",
+        "iconColor": "#CCCC33",
+        "subTypeDisplay": "$MINT_CURRENCY"
+      }
+    }
+  ]
+}

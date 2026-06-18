@@ -1,0 +1,21 @@
+{
+  "rules" : [
+    {
+      "friendlyName" : "Swap Septims to Sigils in the Soul Cairn",
+      "conditions" : {
+        "locations" : [
+          "0x3B8F|Dawnguard.esm"
+        ],
+        "bypassUnsafeContainers": true
+      },
+      "changes":[
+        {
+          "remove" : "0xF|Skyrim.esm",
+          "add" : [
+            "0x6B|MorrowindUsesDrams.esp"
+          ]
+        }
+      ]
+    }
+  ]
+}
