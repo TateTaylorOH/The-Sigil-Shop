@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<PapyrusProject
+	xmlns="PapyrusProject.xsd"
+	Game="sse"
+	Flags="TESV_Papyrus_Flags.flg"
+	Output="Scripts"
+	Optimize="false" Anonymize="true" Package="false" Zip="false">
+	<Variables>
+		<Variable Name="nodePath" Value="C:/Games/Tools/nodeScripts"/>
+		<Variable Name="modname" Value="The-Sigil-Shop"/>
+		<Variable Name="filename" Value=""/>
+		<Variable Name="version" Value="0.0.0"/>
+		<Variable Name="autoVersion" Value="true"/>
+		<Variable Name="skyrimPath" Value="C:/Games/Steam/steamapps/common/Skyrim Special Edition/Data"/>
+		<Variable Name="modsPath" Value="C:/Games/Tools/MO2/profiles/Skyrim Special Edition/mods"/>
+		<Variable Name="temppath" Value="temp"/>
+		<Variable Name="sourcePath" Value="Source/Scripts"/>
+		<Variable Name="altSourcePath" Value="Scripts/Source"/>
+		<Variable Name="projectPath" Value="@modsPath/@modname"/>
+	</Variables>
+	<Imports>
+		<Import>@sourcePath</Import>
+		<Import>@modsPath/SKSE Source/@sourcePath</Import>
+		<Import>@skyrimPath/@sourcePath</Import>
+	</Imports>
+	<PreBuildEvent Description="Node Scripts" UseInBuild="false">
+		<Command>node @nodePath/sortFragments sourcePath="@projectPath/@sourcePath"</Command>
+		<Command>node @nodePath/FOMODverCheck projectPath="@projectPath" version="@version" autoVersion="@autoVersion"</Command>
+	</PreBuildEvent>
+	<Folders>
+		<Folder NoRecurse="true">@sourcePath</Folder>
+	</Folders>
+	<!--<Packages Output="archives">-->
+		<!--<Package Name="@filename" RootDir="@projectPath">-->
+			<!--<Match In="Meshes">*.*</Match>-->
+			<!--<Match In="Music">*.xwm</Match>-->
+			<!--<Match In="Sound">*.*</Match>-->
+			<!--<Match In="seq">*.seq</Match>-->
+			<!--<Match In="Scripts">*.pex</Match>-->
+		<!--</Package>-->
+	<!--</Packages>-->
+</PapyrusProject>
