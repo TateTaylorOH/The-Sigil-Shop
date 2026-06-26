@@ -12,7 +12,7 @@
         {
           "remove" : "0xF|Skyrim.esm",
           "add" : [
-            "0x6B|MorrowindUsesDrams.esp"
+            "0xDE5031|Update.esm"
           ]
         }
       ]
