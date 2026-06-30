@@ -20,6 +20,8 @@
 	</Variables>
 	<Imports>
 		<Import>@sourcePath</Import>
+		<Import>@modsPath/MINT/@sourcePath</Import>
+		<Import>@modsPath/Currency Swapper/@sourcePath</Import>
 		<Import>@modsPath/SKSE Source/@sourcePath</Import>
 		<Import>@skyrimPath/@sourcePath</Import>
 	</Imports>

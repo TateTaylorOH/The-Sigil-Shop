@@ -4,6 +4,16 @@ Actor Property PlayerRef Auto
 Perk Property SEHT_FortifyCriticalDamagePerk Auto
 Perk Property SEHT_ResistCriticalDamagePerk Auto
 
+;prices
+string property settingBarterMax = "fBarterMax" autoreadonly
+string property settingBarterMin = "fBarterMin" autoreadonly
+string property settingBuyMin = "fBarterBuyMin" autoreadonly
+string property settingSellMax = "fBarterSellMax" autoreadonly
+float barterMax
+float barterMin
+float buyMin
+float sellMax
+
 ;compatibility
 ;Elven Hunter
 bool property ElvenHunterFound Auto Hidden
@@ -53,6 +63,26 @@ Event OnInit()
 	if(!GhostsFound)
 		PatchOutGhosts()
 	endIf
+endEvent
+
+function FlattenPrices()
+	barterMax = Game.GetGameSettingFloat(settingBarterMax)
+	barterMin = Game.GetGameSettingFloat(settingBarterMin)
+	buyMin = Game.GetGameSettingFloat(settingBuyMin)
+	sellMax = Game.GetGameSettingFloat(settingSellMax)
+	Game.SetGameSettingFloat(settingBarterMax, 1.0)
+	Game.SetGameSettingFloat(settingBarterMin, 1.0)
+	Game.SetGameSettingFloat(settingBuyMin, 1.0)
+	Game.SetGameSettingFloat(settingSellMax, 1.0)
+	RegisterForMenu("BarterMenu")
+endFunction
+
+Event OnMenuClose(String MenuName)
+	UnregisterForAllMenus()
+	Game.SetGameSettingFloat(settingBarterMax, barterMax)
+	Game.SetGameSettingFloat(settingBarterMin, barterMin)
+	Game.SetGameSettingFloat(settingBuyMin, buyMin)
+	Game.SetGameSettingFloat(settingSellMax, sellMax)
 endEvent
 
 function CheckCompatibility()
