@@ -16,6 +16,23 @@
           ]
         }
       ]
+    },
+    {
+      "friendlyName" : "Add Sigils to Soul Cairn Chests",
+      "conditions" : {
+        "containers" : [
+          "0x1692A|Dawnguard.esm",
+          "0x19DD6|Dawnguard.esm"
+        ]
+      },
+      "changes":[
+        {
+          "add" : [
+            "0x816|SoulCairnUsesSigils.esp"
+          ],
+          "count" : 2
+        }
+      ]
     }
   ]
 }
