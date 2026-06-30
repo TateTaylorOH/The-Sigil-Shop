@@ -1,6 +1,6 @@
 ;BEGIN FRAGMENT CODE - Do not edit anything between this and the end comment
 ;NEXT FRAGMENT INDEX 3
-Scriptname TIF_SEHT_CurrencyFramework_Barter Extends TopicInfo Hidden
+Scriptname TIF_SigilBarter Extends TopicInfo Hidden
 
 ;BEGIN FRAGMENT Fragment_2
 Function Fragment_2(ObjectReference akSpeakerRef)
