@@ -1,0 +1,1 @@
+scriptname SEHT_Injector extends Quest
