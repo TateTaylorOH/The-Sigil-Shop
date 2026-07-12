@@ -3,6 +3,7 @@ let modName = 'The-Sigil-Shop';
 let recordListFilename = 'RecList.csv';
 let referenceListFilename = 'SoulCairnRefs.csv';
 let swapFilename = 'SoulCairnUsesSigils_SWAP.ini';
+let containerJSONFilename = 'Containers.json';
 let discardRecords = ['ACTI', 'DOOR', 'FURN', 'IDLM', 'LIGH', 'MSTT','SOUN', 'STAT', 'TXST'];
 let keepRecords = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'CONT', 'FLOR', 'INGR', 'LVLI', 'MISC', 'NPC_',  'SCRL', 'SLGM', 'TREE', 'WEAP'];
 
@@ -106,21 +107,33 @@ if(unallowedTypes.length > 0){
 	return;
 }
 
+let containerJSONPath = `${zEditOutputPath}/${containerJSONFilename}`;
+let containerContents = {};
+if(fs.existsSync(containerJSONPath)){
+	let file = fs.readFileSync(containerJSONPath, {encoding: 'utf8'});
+	try{
+		let data = JSON.parse(file);
+		containerContents = data;
+	}
+	catch (e){
+		console.log(`Failed to parse ${containerJSONFilename}.`);
+	}
+}
+
 //check that contents are loaded;
 let baseFormIDs = refIDs.map(id => SoulCairnReferenceMap[id].baseForm.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
 //these items cannot contain other items.
-let skipSignatures = ['AMMO', 'ARMO', 'BOOK', 'WEAP'];
+let skipSignatures = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'INGR', 'MISC', 'SLGM', 'WEAP'];
 let contents = {};
 for(let i = 0; i < baseFormIDs.length; i++){
 	let id = baseFormIDs[i];
 	let baseForm = FormIDMap[id];
 	let signature = baseForm.signature;
 	if(skipSignatures.includes(signature)) continue;
-	if(!(id in contents)){
-		console.log(`${id} not found in loaded contents. Load to proceed.`);
-		Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
-		return;
-	} 
+	if(signature === 'CONT' && id in containerContents) continue;
+	console.log(`${id} not found in loaded contents. Load to proceed.`);
+	Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
+	return;
 }
 
 //TODO: determine inventory of containers, flora, leveled items, npcs, and trees
