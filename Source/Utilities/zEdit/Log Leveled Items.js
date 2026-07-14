@@ -13,7 +13,15 @@ let data = Object.fromEntries(recs.map(rec => {
 		UseAll: lvliFlags.includes("Use All"),
 		SpecialLoot: lvliFlags.includes("Special Loot")
 	};
-	let obj = {formID, editorID, chanceNoneInt, chanceNoneGlob, flags};
+	let entries = xelib.HasElement(rec, 'Leveled List Entries')?
+		xelib.GetElements(rec, 'Leveled List Entries')
+		.map(e => {
+			let level = xelib.GetIntValue(e, 'LVLO\\Level');
+			let item = xelib.GetHexFormID(xelib.GetLinksTo(e, 'LVLO\\Reference'));
+			let count = xelib.GetIntValue(e, 'LVLO\\Count');
+			return {level, item, count};
+		}) : [];
+	let obj = {formID, editorID, chanceNoneInt, chanceNoneGlob, flags, entries};
 	return [formID, obj];
 }));
 fh.saveJsonFile('C:/Games/Tools/MO2/profiles/Skyrim Special Edition/mods/The-Sigil-Shop/Source/Utilities/zEdit/LeveledItems.json', data);

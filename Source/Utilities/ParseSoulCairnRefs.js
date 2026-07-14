@@ -4,6 +4,7 @@ let recordListFilename = 'RecList.csv';
 let referenceListFilename = 'SoulCairnRefs.csv';
 let swapFilename = 'SoulCairnUsesSigils_SWAP.ini';
 let containerJSONFilename = 'Containers.json';
+let floraJSONFilename = 'Flora.json';
 let leveledItemJSONFilename = 'LeveledItems.json';
 let npcJSONFilename = 'NPCs.json';
 let discardRecords = ['ACTI', 'DOOR', 'FURN', 'IDLM', 'LIGH', 'MSTT','SOUN', 'STAT', 'TXST'];
@@ -38,7 +39,6 @@ let EditorIDMap = Object.fromEntries(
 	.filter(rec => rec.editorID !== '')
 	.map(rec => [rec.editorID, rec]));
 console.log(`Mapped ${Object.keys(EditorIDMap).length} records by editor id.`);
-
 
 let refListPath = `${zEditOutputPath}/${referenceListFilename}`;
 if(!fs.existsSync(refListPath)){
@@ -126,6 +126,7 @@ function loadFormJSON(filename){
 	return output;
 }
 let containerContents = loadFormJSON(containerJSONFilename);
+let floraContents = loadFormJSON(floraJSONFilename);
 let leveledItemContents = loadFormJSON(leveledItemJSONFilename);
 let npcContents = loadFormJSON(npcJSONFilename);
 
@@ -140,100 +141,44 @@ for(let i = 0; i < baseFormIDs.length; i++){
 	let signature = baseForm.signature;
 	if(skipSignatures.includes(signature)) continue;
 	if(signature === 'CONT' && id in containerContents) continue;
+	if(signature === 'FLOR' && id in floraContents) continue;
 	if(signature === 'LVLI' && id in leveledItemContents) continue;
 	if(signature === 'NPC_' && id in npcContents) continue;
+	if(signature === 'TREE' && id in floraContents) continue;
 	console.log(`${id} not found in loaded contents. Load or remove to proceed.`);
+	Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
+	return;
+}
+console.log(`Loaded contents of all items.`);
+
+//determine what forms must be resolved to resolve each item
+let inventoryDependencies = {};
+let baseFormIDindices = baseFormIDs.map((e, i) => i);
+for(let i = 0; i < baseFormIDindices.length; i++){
+	let index = baseFormIDindices[i];
+	let id = baseFormIDs[index];
+	let baseForm = FormIDMap[id];
+	let signature = baseForm.signature;
+	if(skipSignatures.includes(signature)){
+		inventoryDependencies[id] = null;
+		continue;
+	}
+	if(signature === 'CONT'){
+		let entries = containerContents[id].entries;
+		let dependencies = entries.map(e => e.item);
+		inventoryDependencies[id] = dependencies;
+		continue;
+	}
+	if(signature === 'LVLI'){
+		console.log(leveledItemContents[id]);
+	}
+	console.log(inventoryDependencies);
+	console.log(`${id} not handled.`);
 	Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
 	return;
 }
 
 //TODO: determine inventory of containers, flora, leveled items, npcs, and trees
 /**
-	CONT
-	'DLC01SC_Chest (02015FDF)',
-	'DLC01SC_Chest02 (0201611F)',
-	'DLC01SC_ChestBoss (020040A5)',
-	'DLC1TreasSoulCairnChest (02015461)',
-	'TreasKnapsack (000B7879)',
-	'DLC01SoulcairnHuskSack (0200689A)',
-	'DLC01VQ05GemChest (0200EA8C)',
-	'TreasDraugrChestBoss (00020671)',
-	'DLC1TreasSoulCairnChest02 (0201692A)'
-	FLOR
-	FLOR - PFIG
-	'DLC01SoulHusk02 (02012DBA)',
-	'DLC01SoulHusk01 (02012DB9)',
-	'SEHT_Sigil_CoinPurseLarge (07000813)',
-	'SEHT_Sigil_CoinPurseMedium (07000812)',
-	'SEHT_Sigil_CoinPurseSmall (07000811)'
-	LVLI
-	'LItemSoulGemRandom (000638B7)',
-	'LootBanditSoulGems100 (000B4211)',
-	'LItemPotionFortifyConjuration (00039ED1)',
-	'LItemSoulGemFullNoBlack (0010DDB9)',
-	'LItemPoisonAllBest (00074A37)',
-	'LItemDragonPriestStaff100 (000EDDD4)',
-	'LItemPotionAllBest (000E3E9A)',
-	'LItemPotionRestoreHMSBest (00065A60)',
-	'LItemEnchWeaponDagger (0008992F)',
-	'LItemArmorShieldAnyBest (000571B1)',
-	'LItemSoulGemEmptyNoBlack (0010DDBB)',
-	'LItemEnchWeaponSwordShock (0010782F)',
-	'LItemEnchSteelDagger (000A6A20)',
-	'LItemHunterWeaponBow (0010D9D2)',
-	'LItemEnchSteelWarAxe (0004B584)',
-	'LItemVigilantBooks (0010BFF1)',
-	'LItemEnchWeaponGreatsword (00089930)'
-	NPC_
-	'DLC01SoulCairnSoulHorseRider (02002B0D)',
-	'DLC1LvlSoulCairnMistman (020071AF)',
-	'DLC1LvlSoulCairnBonemanMeleeAmbush (020150AF)',
-	'DLC1LvlSoulCairnBonemanMissileAmbush (0200BF5E)',
-	'DLC1LvlSoulCairnWrathmanAmbush (02004575)',
-	'DLC1LvlSoulCairnBonemanMissile (020071AA)',
-	'DLC1Valerica (02003B8B)',
-	'DLC1LvlSoulCairnMistmanAmbush (0200BF5C)',
-	'DLC1SoulCairnWisp (0201A8EF)',
-	'DLC1SoulCairnCrystalCaster (02008B34)',
-	'DLC01SoulCairnSoulNecromancerFemale (020150B3)',
-	'TreasCorpseSkeletonRigid (000B9FD8)',
-	'DLC01SoulCairnSoulFarmFemale (02015DF4)',
-	'DLC01SoulCairnSoulHunterM (0201A4FD)',
-	'DLC01SoulCairnSoulMeleeFemale02 (0201A4FA)',
-	'DLC01SoulCairnSoulHunterF (0201A4FC)',
-	'DLC01SoulCairnSoulMageMale03 (0201A503)',
-	'DLC01SoulCairnSoulMeleeMale02 (0201A4FE)',
-	'DLC01SoulCairnKeeperShield (02007B0F)',
-	'DLC01SoulCairnReaper (0201A73E)',
-	'DLC01SoulCairnKeeperBowArrow (020074F9)',
-	'DLC01SoulCairnKeeper2H (020074F8)',
-	'DLC01SoulCairnSoulMorven (020071F1)',
-	'DLC1Durnehviir (020030D8)',
-	'DLC01SoulCairnHorseUnrideable (0200BDCF)',
-	'DLC1VQ05BonemanSummon (0200BFF0)',
-	'DLC1LvlSoulCairnWrathman (020071AD)',
-	'DLC01SoulCairnKeeperSoul (0200EA8B)',
-	'DLC1LvlSoulCairnBonemanMelee (020150AE)',
-	'DLC01SoulCairnJiub (020093A1)',
-	'DLC01SoulCairnSoulMissileFemale (020150B5)',
-	'DLC01SoulCairnSoulNecromancerMale (020150B2)',
-	'DLC01SoulCairnSoulOrcMale (020150B6)',
-	'DLC01SoulCairnSoulMeleeFemale (020150B1)',
-	'DLC01SoulCairnSoulCow (0201602C)',
-	'DLC01SoulCairnSoulFarmMale (02015DF3)',
-	'DLC01SoulCairnSoulMeleeMale (02004759)',
-	'DLC01SoulCairnSoulMageMale (0201A4F7)'
-	TREE - PFIG
-	'TreeSoulCairnShrub02 (02003BDA)',
-	'TreeSoulCairnTreeGroup (0200DDB5)',
-	'TreeSoulCairnTree02 (02004333)',
-	'TreeSoulCairnShrub01 (02003BD9)',
-	'TreeSoulCairnTree03 (02004334)',
-	'TreeSoulCairnShrub03 (02003BDB)',
-	'TreeSoulCairnTree01 (02004332)',
-	'TreeDeadVinePatch (0200431F)',
-	'TreeDeadVineLongAsh (02004322)',
-	'TreeDeadVineHallwayAsh (02004321)',
-	'TreeDeadVinePatchAsh (02004320)',
-	'TreeSoulCairnShrubGroup02 (02011D55)'
+
   **/
