@@ -225,7 +225,7 @@ function resolveCalcOrder(ids){
 		ids.forEach(id => {
 			let dependencies = dependencyList[id];
 			if(typeof dependencies === 'string'){
-				if(calcOrder.includes[dependencies]) dependencyList[id] = null;
+				if(calcOrder.includes(dependencies)) dependencyList[id] = null;
 			}
 			if(typeof dependencies === 'object' && Array.isArray(dependencies)){
 				let remDeps = dependencies.filter(did => !calcOrder.includes(did));
@@ -241,10 +241,9 @@ function resolveCalcOrder(ids){
 	}
 	return calcOrder;
 }
-let allIDs = Object.keys(inventoryDependencies);
-let temp = resolveCalcOrder(allIDs);
-console.log(allIDs.length);
-console.log(temp.length);
+let calcOrder = resolveCalcOrder(Object.keys(inventoryDependencies));
+
+//filter by items that can contain our items of interest IOI
 
 //TODO: determine inventory of containers, flora, leveled items, npcs, and trees
 /**
