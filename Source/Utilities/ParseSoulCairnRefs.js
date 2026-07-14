@@ -244,8 +244,7 @@ function resolveCalcOrder(ids){
 let calcOrder = resolveCalcOrder(Object.keys(inventoryDependencies));
 
 //filter by items that can contain our items of interest IOI
-
-//TODO: determine inventory of containers, flora, leveled items, npcs, and trees
-/**
-
-  **/
+//load CDF config
+//update relevant containers
+//filter baseids to only items that can contain IOI
+//log those, then forecast
