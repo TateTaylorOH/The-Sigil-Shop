@@ -150,33 +150,101 @@ for(let i = 0; i < baseFormIDs.length; i++){
 	return;
 }
 console.log(`Loaded contents of all items.`);
+let baseContentsMap = Object.fromEntries(baseFormIDs
+	.filter(id => !skipSignatures.includes(FormIDMap[id].signature))
+	.map(id => [id, containerContents[id], floraContents[id], leveledItemContents[id], npcContents[id]])
+	.map(entries => entries.filter(v => v !== undefined)));
 
 //determine what forms must be resolved to resolve each item
 let inventoryDependencies = {};
-let baseFormIDindices = baseFormIDs.map((e, i) => i);
-for(let i = 0; i < baseFormIDindices.length; i++){
-	let index = baseFormIDindices[i];
-	let id = baseFormIDs[index];
-	let baseForm = FormIDMap[id];
-	let signature = baseForm.signature;
-	if(skipSignatures.includes(signature)){
-		inventoryDependencies[id] = null;
-		continue;
-	}
+function getDependencies(id, signature){
+	if(skipSignatures.includes(signature)) return null;
+	let dependencies = [];
 	if(signature === 'CONT'){
-		let entries = containerContents[id].entries;
-		let dependencies = entries.map(e => e.item);
-		inventoryDependencies[id] = dependencies;
-		continue;
+		let entries = baseContentsMap[id].entries;
+		dependencies = entries.map(e => e.item);
+	} else if(signature === 'FLOR' || signature === 'TREE') {
+		let plantItem = baseContentsMap[id];
+		if(plantItem === '') return null;
+		return plantItem;
+	} else if(signature === 'LVLI'){
+		let entries = baseContentsMap[id].entries;
+		dependencies = entries.map(e => e.item);
+	} else if(signature === 'NPC_'){
+		let npc = baseContentsMap[id];
+		if(npc.npcFlags.UseTemplate && npc.templateFlags.UseInventory){
+			let template = npc.templateNPC;
+			if(templateNPC !== '') return template;
+			throw new Error(`Invalid inventory flag state on templated NPC ${id} (no template assigned).`);
+		}
+		dependencies = npc.inventoryEntries.map(e => e.item);
+	} else {
+		return undefined;
 	}
-	if(signature === 'LVLI'){
-		console.log(leveledItemContents[id]);
-	}
-	console.log(inventoryDependencies);
-	console.log(`${id} not handled.`);
-	Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
-	return;
+	if(dependencies.length === 0) return null;
+	return dependencies;
 }
+let requiredDependencies = baseFormIDs;
+let missingDependencies = baseFormIDs;
+let pass = 0;
+while(missingDependencies.length > 0){
+	pass++;
+	for(let i = 0; i < missingDependencies.length; i++){
+		let id = missingDependencies[i];
+		let signature = FormIDMap[id].signature;
+		let dependencies = getDependencies(id, signature);
+		if(dependencies !== undefined){
+			inventoryDependencies[id] = dependencies;
+			continue;
+		}
+		console.log(`${id} not handled.`);
+		Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
+		return;
+	}
+	requiredDependencies = Object.values(inventoryDependencies)
+		.filter(v => v !== null).flat()
+		.filter((value, index, array) => array.indexOf(value) === index).sort();
+	missingDependencies = requiredDependencies.filter(id => inventoryDependencies[id] === undefined);
+	console.log(`Pass ${pass}: Identified ${requiredDependencies.length} dependencies. ${missingDependencies.length} remain.`);
+	missingDependencies.filter(id => !skipSignatures.includes(FormIDMap[id].signature))
+		.map(id => [id, containerContents[id], floraContents[id], leveledItemContents[id], npcContents[id]])
+		.map(entries => entries.filter(v => v !== undefined))
+		.forEach(e => baseContentsMap[e[0]] = e[1]);
+}
+
+function resolveCalcOrder(ids){
+	let calcOrder = [];
+	let dependencyList = Object.assign({}, inventoryDependencies);
+	let pass = 0;
+	while(ids.length > 0){
+		pass++;
+		let nullIDs = ids.filter(id => dependencyList[id] === null);
+		calcOrder = calcOrder.concat(nullIDs);
+		nullIDs.forEach(k => delete dependencyList[k]);
+		ids = Object.keys(dependencyList);
+		ids.forEach(id => {
+			let dependencies = dependencyList[id];
+			if(typeof dependencies === 'string'){
+				if(calcOrder.includes[dependencies]) dependencyList[id] = null;
+			}
+			if(typeof dependencies === 'object' && Array.isArray(dependencies)){
+				let remDeps = dependencies.filter(did => !calcOrder.includes(did));
+				if(remDeps.length === 0) {
+					dependencyList[id] = null;
+					return;
+				}
+				dependencyList[id] = remDeps;
+			}
+		});
+		if(nullIDs.length === 0) throw new Error(`Could not sort these ids: ${ids.join(', ')}`);
+		console.log(`Pass ${pass}: Sorted ${nullIDs.length} ids. ${ids.length} remain.`);
+	}
+	return calcOrder;
+}
+let allIDs = Object.keys(inventoryDependencies);
+let temp = resolveCalcOrder(allIDs);
+console.log(allIDs.length);
+console.log(temp.length);
 
 //TODO: determine inventory of containers, flora, leveled items, npcs, and trees
 /**
