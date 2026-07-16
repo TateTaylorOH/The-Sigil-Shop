@@ -172,9 +172,9 @@ function getDependencies(id, signature){
 		dependencies = entries.map(e => e.item);
 	} else if(signature === 'NPC_'){
 		let npc = baseContentsMap[id];
-		if(npc.npcFlags.UseTemplate && npc.templateFlags.UseInventory){
+		if(npc.templateNPC !== '' && npc.templateFlags.UseInventory){
 			let template = npc.templateNPC;
-			if(templateNPC !== '') return template;
+			if(npc.templateNPC !== '') return template;
 			throw new Error(`Invalid inventory flag state on templated NPC ${id} (no template assigned).`);
 		}
 		dependencies = npc.inventoryEntries.map(e => e.item);
@@ -197,8 +197,8 @@ while(missingDependencies.length > 0){
 			inventoryDependencies[id] = dependencies;
 			continue;
 		}
-		console.log(`${id} not handled.`);
-		Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
+		console.log(`Contents of ${id} not handled. Calc order not determined.`);
+		Object.entries(FormIDMap[id]).forEach(e => console.log(`${e[0]}: ${e[1]}`));
 		return;
 	}
 	requiredDependencies = Object.values(inventoryDependencies)
@@ -243,6 +243,53 @@ function resolveCalcOrder(ids){
 }
 let calcOrder = resolveCalcOrder(Object.keys(inventoryDependencies));
 
+let itemCanContainIOI = {};
+function getCanContainIOI(id, signature){
+	if(skipSignatures.includes(signature)) return itemsOfInterest.includes(id);
+	if(signature === "CONT"){
+		let items = baseContentsMap[id].entries.map(e => e.item);
+		return items.some(e => itemCanContainIOI[e.item]);
+	}
+	if(signature === "FLOR" || signature === "TREE"){
+		let plantItem = baseContentsMap[id];
+		if(plantItem === '') return false;
+		return itemCanContainIOI[plantItem];
+	}
+	if(signature === "LVLI"){
+		let items = baseContentsMap[id].entries.map(e => e.item);
+		return items.some(e => itemCanContainIOI[e.item]);
+	}
+	if(signature === "NPC_"){
+		let npc = baseContentsMap[id];
+		let npcFlags = npc.npcFlags;
+		let templateFlags = npc.templateFlags;
+		//player cannot loot this actor
+		if(npcFlags.Essential || npcFlags.IsGhost || npcFlags.Invulnerable) return false;
+		let inventory = npc.inventoryEntries;
+		if(npc.templateNPC !== '' && npc.templateFlags.UseInventory) {
+			console.log(npc);
+			console.log(npcFlags);
+			console.log(templateFlags);
+			let templateNPC = npc.templateNPC;
+			console.log(baseContentsMap[templateNPC]);
+			console.log(itemCanContainIOI[templateNPC]);
+			throw new Error('unhandled case');
+		}
+		return inventory.some(e => itemCanContainIOI[e.item]);
+	}
+}
+for(let i = 0; i < calcOrder.length; i++){
+	let id = calcOrder[i];
+	let baseForm = FormIDMap[id];
+	let canContainIOI = getCanContainIOI(id, baseForm.signature);
+	if(canContainIOI !== undefined){
+		itemCanContainIOI[id] = canContainIOI;
+		continue;
+	}
+	console.log(`(${i+1}/${calcOrder.length}) Could not determine if ${id} can contain items of interest.`);
+	Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
+	return;
+}
 //filter by items that can contain our items of interest IOI
 //load CDF config
 //update relevant containers
