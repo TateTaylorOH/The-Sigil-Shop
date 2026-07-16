@@ -57,7 +57,7 @@ function parseCSV(csvString, columnKeys, defaultValues=undefined, delimiter=',')
 		for(let j = 0; j < n; j++){
 			let k = columnKeys[j];
 			let v = values[j];
-			obj[k] = v;
+			if(v !== '') obj[k] = v;
 		}
 		objects[i] = obj;
 	}
@@ -77,33 +77,30 @@ All data exported with load order:
 function loadRecordList(path){
 	if(!fs.existsSync(path)) throw new Error(`${recordListFilename} not found at expected path\n${path}\nCreate the file to continue.`);
 	let csvText = fs.readFileSync(path, {encoding: 'utf8'});
-	let recordList = parseCSV(csvText, ['formID', 'signature', 'editorID'], ['', '', '']);
+	let recordList = parseCSV(csvText, ['formID', 'signature', 'editorID'])
+		.filter(rec => rec.formID !== null && rec.signature !== null);
 	let FormIDMap = Object.fromEntries(recordList.map(rec => [rec.formID, rec]));
 	let values = Object.values(FormIDMap);
 	console.log(`Loaded ${values.length} records by form id.`);
-	values = values.filter(rec => rec.editorID !== '');
+	values = values.filter(rec => rec.editorID !== null);
 	let EditorIDMap = Object.fromEntries(values.map(rec => [rec.editorID, rec]));
 	console.log(`Mapped ${Object.keys(EditorIDMap).length} records by editor id.`);
 	return {FormIDMap, EditorIDMap};
 }
+function loadReferenceList(path){
+	if(!fs.existsSync(path)) throw new Error(`${referenceListFilename} not found at expected path\n${path}\nCreate the file to continue.`);
+	let csvText = fs.readFileSync(path, {encoding: 'utf8'});
+	let refList = parseCSV(csvText, ['formID', 'signature', 'baseID', 'difficulty'], [null, null, null, 'None'])
+		.filter(rec => rec.formID !== null && rec.signature !== null);
+	let ReferenceDataMap = Object.fromEntries(refList.map(ref => [ref.formID, ref]));
+	let ReferenceIDs = Object.keys(ReferenceDataMap);
+	console.log(`Loaded data for ${ReferenceIDs.length} references.`);
+	return {ReferenceIDs, ReferenceDataMap};
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
-
-if(!fs.existsSync(paths.refListPath)){
-	console.log(`${referenceListFilename} not found at expected path\n${refListPath}\nCreate the file to continue.`);
-	return;
-}
-let SoulCairnReferenceMap = Object.fromEntries(
-	fs.readFileSync(paths.refListPath, {encoding: 'utf8'})
-	.split('\r\n')
-	.map(e => {
-		let [formID, signature, baseID, difficulty] = e.split(',');
-		let obj = {formID, signature, baseID, difficulty};
-		return [formID, obj];
-	}));
-let refIDs = Object.keys(SoulCairnReferenceMap);
-console.log(`Successfully loaded ${refIDs.length} references.`);
+let {ReferenceIDs, ReferenceDataMap}  = loadReferenceList(paths.refListPath);
 
 let swapFound = fs.existsSync(paths.swapPath);
 if(!swapFound){
@@ -127,27 +124,27 @@ if(!swapFound){
 	for(let i = 0; i < oldIDs.length; i++){
 		let oldID = oldIDs[i], oldEditorID = FormIDMap[oldID].editorID, newID = swaps[oldID], newEditorID = FormIDMap[newID].editorID;
 		console.log(`Applying ${oldEditorID !== ''? oldEditorID + ' (' + oldID + ')' : oldID} to ${newEditorID !== ''? newEditorID + ' (' + newID + ')' : newID} swap.`);
-		let swapRefs = refIDs.filter(id => SoulCairnReferenceMap[id].baseID === oldID);
-		swapRefs.forEach(id => SoulCairnReferenceMap[id].baseID = newID);
+		let swapRefs = ReferenceIDs.filter(id => ReferenceDataMap[id].baseID === oldID);
+		swapRefs.forEach(id => ReferenceDataMap[id].baseID = newID);
 		console.log(`Replaced base object of ${swapRefs.length} references.`);
 	}
 }
 
-refIDs.forEach(id => {
-	let ref = SoulCairnReferenceMap[id];
+ReferenceIDs.forEach(id => {
+	let ref = ReferenceDataMap[id];
 	let base = FormIDMap[ref.baseID];
 	ref.baseForm = base;
 });
 
-refIDs = refIDs.filter(id => {
-	let baseSig = SoulCairnReferenceMap[id].baseForm.signature;
+ReferenceIDs = ReferenceIDs.filter(id => {
+	let baseSig = ReferenceDataMap[id].baseForm.signature;
 	return !discardRecords.includes(baseSig);
 });
-console.log(`Filtered to ${refIDs.length} references for deeper processing.`);
+console.log(`Filtered to ${ReferenceIDs.length} references for deeper processing.`);
 
 let referenceTypes = [];
-refIDs.forEach(id => {
-	let signature = SoulCairnReferenceMap[id].baseForm.signature;
+ReferenceIDs.forEach(id => {
+	let signature = ReferenceDataMap[id].baseForm.signature;
 	if(!referenceTypes.includes(signature)) referenceTypes.push(signature);
 });
 referenceTypes.sort();
@@ -180,7 +177,7 @@ let leveledItemContents = loadFormJSON(leveledItemJSONFilename);
 let npcContents = loadFormJSON(npcJSONFilename);
 
 //check that contents are loaded;
-let baseFormIDs = refIDs.map(id => SoulCairnReferenceMap[id].baseForm.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
+let baseFormIDs = ReferenceIDs.map(id => ReferenceDataMap[id].baseForm.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
 //these items cannot contain other items.
 let skipSignatures = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'INGR', 'MISC', 'SCRL', 'SLGM', 'WEAP'];
 let contents = {};
