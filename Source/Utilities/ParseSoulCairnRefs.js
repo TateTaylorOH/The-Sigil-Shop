@@ -1,4 +1,5 @@
 let fs = require('fs');
+
 let modName = 'The-Sigil-Shop';
 let recordListFilename = 'RecList.csv';
 let referenceListFilename = 'SoulCairnRefs.csv';
@@ -6,27 +7,38 @@ let swapFilename = 'SoulCairnUsesSigils_SWAP.ini';
 let containerJSONFilename = 'Containers.json';
 let floraJSONFilename = 'Flora.json';
 let leveledItemJSONFilename = 'LeveledItems.json';
+let leveledCharacterJSONFilename = 'LeveledCharacters.json';
 let npcJSONFilename = 'NPCs.json';
 let discardRecords = ['ACTI', 'DOOR', 'FURN', 'IDLM', 'LIGH', 'MSTT','SOUN', 'STAT', 'TXST'];
 let keepRecords = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'CONT', 'FLOR', 'INGR', 'LVLI', 'MISC', 'NPC_',  'SCRL', 'SLGM', 'TREE', 'WEAP'];
 
 let itemsOfInterest = ['01DE5031'];
 
-let pathParts = __dirname.split('\\');
-if(!pathParts.map(p => p.toLowerCase()).includes(modName.toLowerCase())){
-	console.log(`Searched for mod root folder named "${modName}" in\n${__dirname}\nbut no folder with that name was found. Correct modName to continue.`);
-	return;
+function getPaths(){
+	let pathParts = __dirname.split('\\'), lowerParts = pathParts.map(s => s.toLowerCase()), lowerName = modName.toLowerCase();
+	let modPartIndex = lowerParts.findIndex(s => s === lowerName);
+	if(modPartIndex < 0) throw new Error(`Searched for mod root folder named "${modName}" in\n${__dirname}\nbut no folder with that name was found. Correct modName to continue.`);
+	let modPath = pathParts.slice(0, modPartIndex + 1).join('/');
+	let zEditOutputPath = `${modPath}/Source/Utilities/zEdit`;
+	let recListPath = `${zEditOutputPath}/${recordListFilename}`;
+	let refListPath = `${zEditOutputPath}/${referenceListFilename}`;
+	let swapPath = `${modPath}/${swapFilename}`;
+	return {
+		modPath,
+		zEditOutputPath,
+		recListPath,
+		refListPath,
+		swapPath
+	};
 }
-let modPath = pathParts.slice(0, pathParts.findIndex(p => p.toLowerCase() === modName.toLowerCase()) + 1).join('/');
-let zEditOutputPath = `${modPath}/Source/Utilities/zEdit`;
+let paths = getPaths();
 
-let recListPath = `${zEditOutputPath}/${recordListFilename}`;
-if(!fs.existsSync(recListPath)){
+if(!fs.existsSync(paths.recListPath)){
 	console.log(`${recordListFilename} not found at expected path\n${recListPath}\nCreate the file to continue.`);
 	return;
 }
 let FormIDMap = Object.fromEntries(
-	fs.readFileSync(recListPath, {encoding: 'utf8'})
+	fs.readFileSync(paths.recListPath, {encoding: 'utf8'})
 	.split('\r\n')
 	.map(e => {
 		let [formID, signature, editorID] = e.split(',');
@@ -40,13 +52,12 @@ let EditorIDMap = Object.fromEntries(
 	.map(rec => [rec.editorID, rec]));
 console.log(`Mapped ${Object.keys(EditorIDMap).length} records by editor id.`);
 
-let refListPath = `${zEditOutputPath}/${referenceListFilename}`;
-if(!fs.existsSync(refListPath)){
+if(!fs.existsSync(paths.refListPath)){
 	console.log(`${referenceListFilename} not found at expected path\n${refListPath}\nCreate the file to continue.`);
 	return;
 }
 let SoulCairnReferenceMap = Object.fromEntries(
-	fs.readFileSync(refListPath, {encoding: 'utf8'})
+	fs.readFileSync(paths.refListPath, {encoding: 'utf8'})
 	.split('\r\n')
 	.map(e => {
 		let [formID, signature, baseID, difficulty] = e.split(',');
@@ -56,15 +67,14 @@ let SoulCairnReferenceMap = Object.fromEntries(
 let refIDs = Object.keys(SoulCairnReferenceMap);
 console.log(`Successfully loaded ${refIDs.length} references.`);
 
-let swapPath = `${modPath}/${swapFilename}`;
-let swapFound = fs.existsSync(swapPath);
+let swapFound = fs.existsSync(paths.swapPath);
 if(!swapFound){
-	console.log(`${swapFilename} not found at expected path\n${swapPath}\nSwaps will not be applied.`);
+	console.log(`${swapFilename} not found at expected path\n${paths.swapPath}\nSwaps will not be applied.`);
 } else {
 	//syntax. this is only the most basic case.
 	//https://www.nexusmods.com/skyrimspecialedition/mods/60805
 	let swaps = {};
-	let file = fs.readFileSync(swapPath, {encoding: 'utf8'}).replace(/^\uFEFF/, '').trim();
+	let file = fs.readFileSync(paths.swapPath, {encoding: 'utf8'}).replace(/^\uFEFF/, '').trim();
 	let lines = file.split('\r\n');
 	for(let i = 0; i < lines.length; i++){
 		let line = lines[i];
@@ -110,7 +120,7 @@ if(unallowedTypes.length > 0){
 }
 
 function loadFormJSON(filename){
-	let JSONPath = `${zEditOutputPath}/${filename}`;
+	let JSONPath = `${paths.zEditOutputPath}/${filename}`;
 	let output = {};
 	if(fs.existsSync(JSONPath)) {
 		let file = fs.readFileSync(JSONPath, {encoding: 'utf8'});
@@ -127,6 +137,7 @@ function loadFormJSON(filename){
 }
 let containerContents = loadFormJSON(containerJSONFilename);
 let floraContents = loadFormJSON(floraJSONFilename);
+let leveledNPCContents = loadFormJSON(leveledCharacterJSONFilename);
 let leveledItemContents = loadFormJSON(leveledItemJSONFilename);
 let npcContents = loadFormJSON(npcJSONFilename);
 
@@ -152,7 +163,7 @@ for(let i = 0; i < baseFormIDs.length; i++){
 console.log(`Loaded contents of all items.`);
 let baseContentsMap = Object.fromEntries(baseFormIDs
 	.filter(id => !skipSignatures.includes(FormIDMap[id].signature))
-	.map(id => [id, containerContents[id], floraContents[id], leveledItemContents[id], npcContents[id]])
+	.map(id => [id, containerContents[id], floraContents[id], leveledNPCContents[id], leveledItemContents[id], npcContents[id]])
 	.map(entries => entries.filter(v => v !== undefined)));
 
 //determine what forms must be resolved to resolve each item
@@ -167,7 +178,7 @@ function getDependencies(id, signature){
 		let plantItem = baseContentsMap[id];
 		if(plantItem === '') return null;
 		return plantItem;
-	} else if(signature === 'LVLI'){
+	} else if(signature === 'LVLI' || signature === 'LVLN'){
 		let entries = baseContentsMap[id].entries;
 		dependencies = entries.map(e => e.item);
 	} else if(signature === 'NPC_'){
@@ -207,7 +218,7 @@ while(missingDependencies.length > 0){
 	missingDependencies = requiredDependencies.filter(id => inventoryDependencies[id] === undefined);
 	console.log(`Pass ${pass}: Identified ${requiredDependencies.length} dependencies. ${missingDependencies.length} remain.`);
 	missingDependencies.filter(id => !skipSignatures.includes(FormIDMap[id].signature))
-		.map(id => [id, containerContents[id], floraContents[id], leveledItemContents[id], npcContents[id]])
+		.map(id => [id, containerContents[id], floraContents[id], leveledNPCContents[id], leveledItemContents[id], npcContents[id]])
 		.map(entries => entries.filter(v => v !== undefined))
 		.forEach(e => baseContentsMap[e[0]] = e[1]);
 }
@@ -255,7 +266,7 @@ function getCanContainIOI(id, signature){
 		if(plantItem === '') return false;
 		return itemCanContainIOI[plantItem];
 	}
-	if(signature === "LVLI"){
+	if(signature === "LVLI" || signature === "LVLN"){
 		let items = baseContentsMap[id].entries.map(e => e.item);
 		return items.some(e => itemCanContainIOI[e.item]);
 	}
@@ -267,13 +278,8 @@ function getCanContainIOI(id, signature){
 		if(npcFlags.Essential || npcFlags.IsGhost || npcFlags.Invulnerable) return false;
 		let inventory = npc.inventoryEntries;
 		if(npc.templateNPC !== '' && npc.templateFlags.UseInventory) {
-			console.log(npc);
-			console.log(npcFlags);
-			console.log(templateFlags);
 			let templateNPC = npc.templateNPC;
-			console.log(baseContentsMap[templateNPC]);
-			console.log(itemCanContainIOI[templateNPC]);
-			throw new Error('unhandled case');
+			return itemCanContainIOI[templateNPC];
 		}
 		return inventory.some(e => itemCanContainIOI[e.item]);
 	}
