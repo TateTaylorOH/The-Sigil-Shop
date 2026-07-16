@@ -31,26 +31,64 @@ function getPaths(){
 		swapPath
 	};
 }
-let paths = getPaths();
-
-if(!fs.existsSync(paths.recListPath)){
-	console.log(`${recordListFilename} not found at expected path\n${recListPath}\nCreate the file to continue.`);
-	return;
+function parseCSV(csvString, columnKeys, defaultValues=undefined, delimiter=','){
+	let lines = csvString.split('\r\n');
+	if(columnKeys === undefined){
+		let maxValues = 0;
+		for(let i = 0; i < lines.length; i++){
+			let line = lines[i], count = line.length > 0? 1 : 0;
+			for(let j = 0; j < line.length; j++){
+				if(line.charAt(j) === delimiter) count++;
+			}
+			if(count > maxValues) maxValues = count;
+		}
+		columnKeys = new Array(maxValues).fill(0).map((e, i) => 'field'+i);
+	}
+	let numFields = columnKeys.length;
+	if(defaultValues === undefined) defaultValues = columnKeys.map(k => null);
+	while(defaultValues.length < numFields) defaultValues.push(null);
+	let defaultObject = Object.fromEntries(columnKeys.map((e, i) => [e, defaultValues[i]]));
+	let objects = new Array(lines.length);
+	for(let i = 0; i < lines.length; i++){
+		let line = lines[i];
+		let values = line.split(delimiter);
+		let n = Math.min(numFields, values.length);
+		let obj = Object.assign({}, defaultObject);
+		for(let j = 0; j < n; j++){
+			let k = columnKeys[j];
+			let v = values[j];
+			obj[k] = v;
+		}
+		objects[i] = obj;
+	}
+	return objects;
 }
-let FormIDMap = Object.fromEntries(
-	fs.readFileSync(paths.recListPath, {encoding: 'utf8'})
-	.split('\r\n')
-	.map(e => {
-		let [formID, signature, editorID] = e.split(',');
-		let obj = {formID, signature, editorID};
-		return [formID, obj];
-	}));
-console.log(`Successfully loaded ${Object.keys(FormIDMap).length} form ids.`);
-let EditorIDMap = Object.fromEntries(
-	Object.values(FormIDMap)
-	.filter(rec => rec.editorID !== '')
-	.map(rec => [rec.editorID, rec]));
-console.log(`Mapped ${Object.keys(EditorIDMap).length} records by editor id.`);
+/**
+All data exported with load order:
+00 Skyrim.esm
+01 Update.esm
+02 Dawnguard.esm
+03 Hearthfires.esm
+04 Dragonborn.esm
+05 ccbgssse025-advdsgs.esm
+06 M.I.N.T.esp
+07 SoulCairnUsesSigils.esp
+*/
+function loadRecordList(path){
+	if(!fs.existsSync(path)) throw new Error(`${recordListFilename} not found at expected path\n${path}\nCreate the file to continue.`);
+	let csvText = fs.readFileSync(path, {encoding: 'utf8'});
+	let recordList = parseCSV(csvText, ['formID', 'signature', 'editorID'], ['', '', '']);
+	let FormIDMap = Object.fromEntries(recordList.map(rec => [rec.formID, rec]));
+	let values = Object.values(FormIDMap);
+	console.log(`Loaded ${values.length} records by form id.`);
+	values = values.filter(rec => rec.editorID !== '');
+	let EditorIDMap = Object.fromEntries(values.map(rec => [rec.editorID, rec]));
+	console.log(`Mapped ${Object.keys(EditorIDMap).length} records by editor id.`);
+	return {FormIDMap, EditorIDMap};
+}
+
+let paths = getPaths();
+let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
 
 if(!fs.existsSync(paths.refListPath)){
 	console.log(`${referenceListFilename} not found at expected path\n${refListPath}\nCreate the file to continue.`);
