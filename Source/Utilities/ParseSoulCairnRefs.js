@@ -97,38 +97,137 @@ function loadReferenceList(path){
 	console.log(`Loaded data for ${ReferenceIDs.length} references.`);
 	return {ReferenceIDs, ReferenceDataMap};
 }
+function parseFormID(FormIDMap, EditorIDMap, str){
+	if(str in FormIDMap) return str;
+	if(str in EditorIDMap) return EditorIDMap[str].formID;
+}
+function loadBaseObjectSwapper(path, FormIDMap, EditorIDMap){
+	if(!fs.existsSync(path)){
+		console.log(`${swapFilename} not found at expected path\n${path}\nSwaps will not be applied.`);
+		return;
+	}
+	let file = fs.readFileSync(paths.swapPath, {encoding: 'utf8'}).replace(/^\uFEFF/, '');
+	//read file into sections and values
+	let lines = file.split('\r\n').filter(s => s !== '');
+	let sections = [];
+	let currentSection = [];
+	for(let i = 0; i < lines.length; i++){
+		let line = lines[i];
+		if(line.startsWith('[') && line.endsWith(']') && currentSection.length > 0){
+			sections.push(currentSection);
+			currentSection = [];
+		}
+		currentSection.push(line);
+	}
+	if(currentSection.length > 0) sections.push(currentSection);
+	//parsing sections into BOS rules
+	//https://www.nexusmods.com/skyrimspecialedition/mods/60805
+	//many cases are not handled because po3's documentation is so dogshit, and frankly this mod does a lot of shit it shouldn't
+	//refer to the page for syntax is something should parse and doesn't
+	let rules = [];
+	for(let i = 0; i < sections.length; i++){
+		let section = sections[i];
+		let sectionHeader = section[0];
+		let ruleType = null;
+		if(sectionHeader === '[Forms]') ruleType = 'ByBaseObject';
+		if(sectionHeader === '[References]') ruleType = 'BySpecificReference';
+		if(sectionHeader.startsWith('[Forms|') && sectionHeader.endsWith(']')) ruleType = 'ByFilter';
+		let filter = null;
+		if(ruleType === 'ByFilter'){
+			filter = sectionHeader.slice(sectionHeader.indexOf('|')+1,-1).split(',')
+				.map(id => {
+					let parsed = parseFormID(FormIDMap, EditorIDMap, id);
+					if(parsed === undefined) throw new Error(`Failed to parse a form from ${id} in line ${sectionHeader} from ${swapFilename}.`);
+					return parsed;
+				});
+		}
+		if(ruleType === null || (ruleType === 'ByFilter' && filter === null)) throw new Error(`Failed to parse a rule type in line ${sectionHeader} from ${swapFilename}`);
+		let swaps = [];
+		for(let j = 1; j < section.length; j++){
+			let line = section[j];
+			let fields = line.split('|');
+			if(fields.length < 2) throw new Error(`Failed to parse a rule in line ${sectionHeader} from ${swapFilename}`);
+			let [originalIDs, newIDs] = fields;
+			originalIDs = originalIDs.split(',').map(id => {
+				let parsed = parseFormID(FormIDMap, EditorIDMap, id);
+				if(parsed === undefined) throw new Error(`Failed to parse a form from ${id} in line ${line} from ${swapFilename}.`);
+				return parsed;
+			});
+			newIDs = newIDs.split(',').map(id => {
+				let parsed = parseFormID(FormIDMap, EditorIDMap, id);
+				if(parsed === undefined) throw new Error(`Failed to parse a form from ${id} in line ${line} from ${swapFilename}.`);
+				return parsed;
+			});
+			if(newIDs.length > 1) throw new Error(`Unhandled case: Multiple new IDs in line ${line} from ${swapFilename}.`);
+			swaps.push({originalIDs, newIDs});
+		}
+		rules.push({ruleType, filter, swaps});
+	}
+	console.log(`Loaded ${rules.length} Base Object Swapper rule${rules.length > 1? 's': ''} from ${swapFilename}.`);
+	return rules;
+}
+function applyBaseObjectSwap(RefIDs, ReferenceDataMap, FormIDMap, BOSRules, ByFilterFunction){
+	if(ByFilterFunction === undefined) ByFilterFunction = (id) => false;
+	let rules = BOSRules.filter(rule => {
+		if(rule.ruleType === 'ByBaseObject' || rule.ruleType === 'BySpecificReference') return true;
+		if(rule.ruleType === 'ByFilter') return rule.filter.some(ByFilterFunction);
+		throw new Error(`Failed to parse BOS rule ${rule.ruleType} (filter: ${rule.filter})`);
+	});
+	const getDisplayIDs = (ids) => {
+		let displayIDs = ids.map((id => FormIDMap[id].editorID ?? id));
+		if(displayIDs.length === 1) return displayIDs[0];
+		return `[${displayIDs.join(', ')}]`;
+	};
+	const applySwap = (refID, newIDs) => {
+		let ref = ReferenceDataMap[refID];
+		//this is the line you'd need to change for the multi ID case
+		//probably easiest to replace with a fake form id, `BOS${ruleNum}`, and log a fake form with which IDs can replace it/chances for forecasting purposes later
+		//but we're ignoring that case for now because it's real bad
+		//why is po3 like this
+		ref.baseID = newIDs[0];
+	};
+	let n = rules.length;
+	if(n === 0){
+		console.log(`No BOS rules apply to this case.`);
+		return;
+	}
+	console.log(`${n === BOSRules.length? 'All loaded' : (n + '/' + BOSRules.length)} BOS rules apply to this case.`);
+	for(let i = 0; i < rules.length; i++){
+		let rule = rules[i], ruleType = rule.ruleType, swaps = rule.swaps;
+		if(ruleType === 'ByBaseObject' || ruleType === 'ByFilter'){
+			for(let j = 0; j < swaps.length; j++){
+				let originalIDs = swaps[j].originalIDs, newIDs = swaps[j].newIDs;
+				if(newIDs.length > 1) throw new Error(`Unhandled case: Multiple new IDs in line ${line} from ${swapFilename}.`);
+				let originalDispIDs = getDisplayIDs(originalIDs), newDispIDs = getDisplayIDs(newIDs);
+				let ruleNum = `${i + 1}${swaps.length === 1? '' : String.fromCodePoint(65+j)}`;
+				let ruleName = ruleType === 'ByBaseObject'? 'Swap by Base Object': `Swap by Location (${getDisplayIDs(rule.filter)})`;
+				let swapRefs = RefIDs.filter(id => originalIDs.includes(ReferenceDataMap[id].baseID));
+				swapRefs.forEach(id => applySwap(id, newIDs));
+				console.log(`Applied BOS rule ${ruleNum}. ${ruleName}: ${originalDispIDs} -> ${newDispIDs}. Replaced base object of ${swapRefs.length} references.`);
+			}
+		}
+		if(ruleType === 'BySpecificReference'){
+			for(let j = 0; j < swaps.length; j++){
+				let originalIDs = swaps[j].originalIDs, newIDs = swaps[j].newIDs;
+				if(newIDs.length > 1) throw new Error(`Unhandled case: Multiple new IDs in line ${line} from ${swapFilename}.`);
+				let originalDispIDs = getDisplayIDs(originalIDs), newDispIDs = getDisplayIDs(newIDs);
+				let ruleNum = `${i + 1}${swaps.length === 1? '' : String.fromCodePoint(65+j)}`;
+				let ruleName = `Swap Specific Refs`;
+				let swapRefs = originalIDs.filter(id => RefIDs.includes(id));
+				swapRefs.forEach(id => applySwap(id, newIDs));
+				console.log(`Applied BOS rule ${ruleNum}. ${ruleName}: ${originalDispIDs} -> ${newDispIDs}. Replaced base object of ${swapRefs.length} references.`);
+			}
+		}
+	}
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
 let {ReferenceIDs, ReferenceDataMap}  = loadReferenceList(paths.refListPath);
+let bosRules = loadBaseObjectSwapper(paths.swapPath, FormIDMap, EditorIDMap);
+if(bosRules !== undefined) applyBaseObjectSwap(ReferenceIDs, ReferenceDataMap, FormIDMap, bosRules, (id) => FormIDMap[id].editorID === 'DLC1SoulCairnLocation');
 
-let swapFound = fs.existsSync(paths.swapPath);
-if(!swapFound){
-	console.log(`${swapFilename} not found at expected path\n${paths.swapPath}\nSwaps will not be applied.`);
-} else {
-	//syntax. this is only the most basic case.
-	//https://www.nexusmods.com/skyrimspecialedition/mods/60805
-	let swaps = {};
-	let file = fs.readFileSync(paths.swapPath, {encoding: 'utf8'}).replace(/^\uFEFF/, '').trim();
-	let lines = file.split('\r\n');
-	for(let i = 0; i < lines.length; i++){
-		let line = lines[i];
-		if(line.startsWith('[') && line.endsWith(']')) continue; //section line, i don't care for this case
-		let [oldId, newID] = line.split('|');
-		let oldFormID = oldId in FormIDMap? oldId : (oldId in EditorIDMap? EditorIDMap[oldId].formID : undefined);
-		let newFormID = newID in FormIDMap? newID : (newID in EditorIDMap? EditorIDMap[newID].formID : undefined);
-		if(oldFormID !== undefined && newFormID !== undefined) swaps[oldFormID] = newFormID;
-	}
-	console.log(`Loaded ${Object.keys(swaps).length} base object swaps.`);
-	let oldIDs = Object.keys(swaps);
-	for(let i = 0; i < oldIDs.length; i++){
-		let oldID = oldIDs[i], oldEditorID = FormIDMap[oldID].editorID, newID = swaps[oldID], newEditorID = FormIDMap[newID].editorID;
-		console.log(`Applying ${oldEditorID !== ''? oldEditorID + ' (' + oldID + ')' : oldID} to ${newEditorID !== ''? newEditorID + ' (' + newID + ')' : newID} swap.`);
-		let swapRefs = ReferenceIDs.filter(id => ReferenceDataMap[id].baseID === oldID);
-		swapRefs.forEach(id => ReferenceDataMap[id].baseID = newID);
-		console.log(`Replaced base object of ${swapRefs.length} references.`);
-	}
-}
+return;
 
 ReferenceIDs.forEach(id => {
 	let ref = ReferenceDataMap[id];
