@@ -220,20 +220,18 @@ function applyBaseObjectSwap(RefIDs, ReferenceDataMap, FormIDMap, BOSRules, ByFi
 		}
 	}
 }
+function applyBaseDataToRefs(FormIDMap, ReferenceDataMap){
+	Object.values(ReferenceDataMap).forEach(ref => ref.baseForm = FormIDMap[ref.baseID]);
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
 let {ReferenceIDs, ReferenceDataMap}  = loadReferenceList(paths.refListPath);
 let bosRules = loadBaseObjectSwapper(paths.swapPath, FormIDMap, EditorIDMap);
 if(bosRules !== undefined) applyBaseObjectSwap(ReferenceIDs, ReferenceDataMap, FormIDMap, bosRules, (id) => FormIDMap[id].editorID === 'DLC1SoulCairnLocation');
+applyBaseDataToRefs(FormIDMap, ReferenceDataMap);//simplify ref data lookups now that bos swaps are applied
 
 return;
-
-ReferenceIDs.forEach(id => {
-	let ref = ReferenceDataMap[id];
-	let base = FormIDMap[ref.baseID];
-	ref.baseForm = base;
-});
 
 ReferenceIDs = ReferenceIDs.filter(id => {
 	let baseSig = ReferenceDataMap[id].baseForm.signature;
