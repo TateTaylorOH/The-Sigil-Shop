@@ -4,6 +4,7 @@ let modName = 'The-Sigil-Shop';
 let recordListFilename = 'RecList.csv';
 let referenceListFilename = 'SoulCairnRefs.csv';
 let swapFilename = 'SoulCairnUsesSigils_SWAP.ini';
+let cdfFilename = 'SoulCairnUsesSigils.json';
 let containerJSONFilename = 'Containers.json';
 let floraJSONFilename = 'Flora.json';
 let leveledItemJSONFilename = 'LeveledItems.json';
@@ -23,12 +24,14 @@ function getPaths(){
 	let recListPath = `${zEditOutputPath}/${recordListFilename}`;
 	let refListPath = `${zEditOutputPath}/${referenceListFilename}`;
 	let swapPath = `${modPath}/${swapFilename}`;
+	let cdfPath = `${modPath}/SKSE/Plugins/ContainerDistributionFramework/${cdfFilename}`;
 	return {
 		modPath,
 		zEditOutputPath,
 		recListPath,
 		refListPath,
-		swapPath
+		swapPath,
+		cdfPath
 	};
 }
 function parseCSV(csvString, columnKeys, defaultValues=undefined, delimiter=','){
@@ -106,7 +109,7 @@ function loadBaseObjectSwapper(path, FormIDMap, EditorIDMap){
 		console.log(`${swapFilename} not found at expected path\n${path}\nSwaps will not be applied.`);
 		return;
 	}
-	let file = fs.readFileSync(paths.swapPath, {encoding: 'utf8'}).replace(/^\uFEFF/, '');
+	let file = fs.readFileSync(path, {encoding: 'utf8'}).replace(/^\uFEFF/, '');
 	//read file into sections and values
 	let lines = file.split('\r\n').filter(s => s !== '');
 	let sections = [];
@@ -220,6 +223,15 @@ function applyBaseObjectSwap(RefIDs, ReferenceDataMap, FormIDMap, BOSRules, ByFi
 		}
 	}
 }
+function loadContainerDistributionFramework(path){
+	if(!fs.existsSync(path)){
+		console.log(`${cdfFilename} not found at expected path\n${path}\nContainer distribution will not be applied.`);
+		return;
+	}
+	let file = fs.readFileSync(path, {encoding: 'utf8'});
+	let json = JSON.parse(file);
+	console.log(json);
+}
 function applyBaseDataToRefs(FormIDMap, ReferenceDataMap){
 	Object.values(ReferenceDataMap).forEach(ref => ref.baseForm = FormIDMap[ref.baseID]);
 }
@@ -240,6 +252,10 @@ let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
 let {ReferenceIDs, ReferenceDataMap}  = loadReferenceList(paths.refListPath);
 let bosRules = loadBaseObjectSwapper(paths.swapPath, FormIDMap, EditorIDMap);
 if(bosRules !== undefined) applyBaseObjectSwap(ReferenceIDs, ReferenceDataMap, FormIDMap, bosRules, (id) => FormIDMap[id].editorID === 'DLC1SoulCairnLocation');
+
+loadContainerDistributionFramework(paths.cdfPath);
+return;
+
 applyBaseDataToRefs(FormIDMap, ReferenceDataMap);//simplify ref data lookups now that bos swaps are applied
 let InvRefIDs = filterItemNPCRecs(ReferenceIDs, ReferenceDataMap);
 
