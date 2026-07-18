@@ -223,6 +223,17 @@ function applyBaseObjectSwap(RefIDs, ReferenceDataMap, FormIDMap, BOSRules, ByFi
 function applyBaseDataToRefs(FormIDMap, ReferenceDataMap){
 	Object.values(ReferenceDataMap).forEach(ref => ref.baseForm = FormIDMap[ref.baseID]);
 }
+const worldOnlyRecs = ['ACTI', 'DOOR', 'FURN', 'IDLM', 'LIGH', 'MSTT','SOUN', 'STAT', 'TXST'];
+const itemAndNPCRecs = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'CONT', 'FLOR', 'INGR', 'LVLI', 'MISC', 'NPC_',  'SCRL', 'SLGM', 'TREE', 'WEAP'];
+function filterItemNPCRecs(ReferenceIDs, ReferenceDataMap){
+	let filteredIDs = ReferenceIDs.filter(id => !worldOnlyRecs.includes(ReferenceDataMap[id].baseForm.signature));
+	let baseSigs = filteredIDs.map(id => ReferenceDataMap[id].baseForm.signature)
+		.filter((value, index, array) => array.indexOf(value) === index).sort();
+	let unhandledSigs = baseSigs.filter(sig => !itemAndNPCRecs.includes(sig));
+	if(unhandledSigs.length > 0) throw new Error(`Some records with unchecked signatures are in the dataset. Label them as "world only" or "item and NPC" to continue.\n${unhandledSigs.join(', ')}`);
+	console.log(`Filtered to ${filteredIDs.length} references for deeper processing.`);
+	return filteredIDs;
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
@@ -230,26 +241,9 @@ let {ReferenceIDs, ReferenceDataMap}  = loadReferenceList(paths.refListPath);
 let bosRules = loadBaseObjectSwapper(paths.swapPath, FormIDMap, EditorIDMap);
 if(bosRules !== undefined) applyBaseObjectSwap(ReferenceIDs, ReferenceDataMap, FormIDMap, bosRules, (id) => FormIDMap[id].editorID === 'DLC1SoulCairnLocation');
 applyBaseDataToRefs(FormIDMap, ReferenceDataMap);//simplify ref data lookups now that bos swaps are applied
+let InvRefIDs = filterItemNPCRecs(ReferenceIDs, ReferenceDataMap);
 
 return;
-
-ReferenceIDs = ReferenceIDs.filter(id => {
-	let baseSig = ReferenceDataMap[id].baseForm.signature;
-	return !discardRecords.includes(baseSig);
-});
-console.log(`Filtered to ${ReferenceIDs.length} references for deeper processing.`);
-
-let referenceTypes = [];
-ReferenceIDs.forEach(id => {
-	let signature = ReferenceDataMap[id].baseForm.signature;
-	if(!referenceTypes.includes(signature)) referenceTypes.push(signature);
-});
-referenceTypes.sort();
-let unallowedTypes = referenceTypes.filter(s => !keepRecords.includes(s));
-if(unallowedTypes.length > 0){
-	console.log(`Some records with unchecked signatures are in the dataset. Label them as keep or discard to continue.\n${unallowedTypes.join(', ')}`);
-	return;
-}
 
 function loadFormJSON(filename){
 	let JSONPath = `${paths.zEditOutputPath}/${filename}`;
