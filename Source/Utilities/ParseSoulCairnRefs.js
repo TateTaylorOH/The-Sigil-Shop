@@ -100,9 +100,30 @@ function loadReferenceList(path){
 	console.log(`Loaded data for ${ReferenceIDs.length} references.`);
 	return {ReferenceIDs, ReferenceDataMap};
 }
+//matches /(start of string)0x[1-6 hex digits]|(any valid filename characters).es[lmp](end of string)
+const loadOrder = [
+	'Skyrim.esm',
+	'Update.esm',
+	'Dawnguard.esm',
+	'Hearthfires.esm',
+	'Dragonborn.esm',
+	'ccbgssse025-advdsgs.esm',
+	'M.I.N.T.esp',
+	'SoulCairnUsesSigils.esp'
+];
+const cdfFormstringRegex = /^0x([0-9a-f]{1,6})\|([^\<\>\:\"\/\\\|\?\*]+.es[lmp])$/i;
 function parseFormID(FormIDMap, EditorIDMap, str){
 	if(str in FormIDMap) return str;
 	if(str in EditorIDMap) return EditorIDMap[str].formID;
+	let cdfMatch = cdfFormstringRegex.exec(str);
+	if(cdfMatch !== null){
+		let formID = cdfMatch[1], filename = cdfMatch[2], lcFilename = filename.toLowerCase();
+		let lo = loadOrder.map(f => f.toLowerCase());
+		if(!lo.includes(lcFilename)) throw new Error(`Failed to match ${filename} to a file in load order.`);
+		let fileIndex = lo.findIndex(f => f === lcFilename).toString(16);
+		formID = `${'0'.repeat(2-fileIndex.length)}${fileIndex}${'0'.repeat(6-formID.length)}${formID}`.toUpperCase();
+		if(formID in FormIDMap) return formID;
+	}
 }
 function loadBaseObjectSwapper(path, FormIDMap, EditorIDMap){
 	if(!fs.existsSync(path)){
@@ -223,14 +244,64 @@ function applyBaseObjectSwap(RefIDs, ReferenceDataMap, FormIDMap, BOSRules, ByFi
 		}
 	}
 }
-function loadContainerDistributionFramework(path){
+function loadContainerDistributionFramework(path, FormIDMap, EditorIDMap){
 	if(!fs.existsSync(path)){
 		console.log(`${cdfFilename} not found at expected path\n${path}\nContainer distribution will not be applied.`);
 		return;
 	}
 	let file = fs.readFileSync(path, {encoding: 'utf8'});
 	let json = JSON.parse(file);
-	console.log(json);
+	//parsing
+	//https://github.com/SeaSparrowOG/DynamicContainerInventoryFramework/wiki#configuration-rules
+	let rules = [], JSONrules = json.rules ?? [];
+	for(let i = 0; i < JSONrules.length; i++){
+		let rule = JSONrules[i];
+		let name = rule.friendlyName, jsonChanges = rule.changes, changes = [];
+		for(let j = 0; j < jsonChanges.length; j++){
+			let change = jsonChanges[j];
+			let ruleType = null;
+			let remove = parseFormID(FormIDMap, EditorIDMap, change.remove);
+			let add = (change.add ?? []).map(str => parseFormID(FormIDMap, EditorIDMap, str));
+			if('add' in change && 'remove' in change) {
+				ruleType = 'Replace';
+				if(remove === undefined) throw new Error(`Failed to parse FormID from ${change.remove} in rule ${name} in ${cdfFilename}.`);
+				add.forEach((v, index) => {
+					if(v === undefined) throw new Error(`Failed to parse FormID from ${change.add[index]} in rule ${name} in ${cdfFilename}.`);
+				});
+				changes.push({ruleType, remove, add});
+				continue;
+			}
+			if('add' in change && 'removeByKeywords' in change) {
+				ruleType = 'ReplaceByKeywords';
+				throw new Error(`Case ${ruleType} not handled. No keyword processing at this time.`);
+			}
+			if('add' in change) {
+				ruleType = 'Add';
+				add.forEach((v, index) => {
+					if(v === undefined) throw new Error(`Failed to parse FormID from ${change.add[index]} in rule ${name} in ${cdfFilename}.`);
+				});
+				let count = rule.count ?? 1;
+				changes.push({ruleType, add, count});
+				continue;
+			}
+			if('remove' in change) {
+				ruleType = 'Remove';
+				if(remove === undefined) throw new Error(`Failed to parse FormID from ${change.remove} in rule ${name} in ${cdfFilename}.`);
+				let count = rule.count ?? Infinity;
+				changes.push({ruleType, remove, count});
+				continue;
+			}
+			if('removeByKeywords' in change) {
+				ruleType = 'RemoveByKeywords';
+				throw new Error(`Case ${ruleType} not handled. No keyword processing at this time.`);
+			}
+			throw new Error(`Failed to parse rule type from rule ${name} in ${cdfFilename}.`);
+		}
+		let conditions = rule.conditions;
+		rules.push({name, changes, conditions});
+	}
+	console.log(`Loaded ${rules.length} Container Distribution Framework rule${rules.length > 1? 's': ''} from ${cdfFilename}.`);
+	return rules;
 }
 function applyBaseDataToRefs(FormIDMap, ReferenceDataMap){
 	Object.values(ReferenceDataMap).forEach(ref => ref.baseForm = FormIDMap[ref.baseID]);
@@ -252,12 +323,10 @@ let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
 let {ReferenceIDs, ReferenceDataMap}  = loadReferenceList(paths.refListPath);
 let bosRules = loadBaseObjectSwapper(paths.swapPath, FormIDMap, EditorIDMap);
 if(bosRules !== undefined) applyBaseObjectSwap(ReferenceIDs, ReferenceDataMap, FormIDMap, bosRules, (id) => FormIDMap[id].editorID === 'DLC1SoulCairnLocation');
-
-loadContainerDistributionFramework(paths.cdfPath);
-return;
-
 applyBaseDataToRefs(FormIDMap, ReferenceDataMap);//simplify ref data lookups now that bos swaps are applied
 let InvRefIDs = filterItemNPCRecs(ReferenceIDs, ReferenceDataMap);
+
+let cdfRules = loadContainerDistributionFramework(paths.cdfPath, FormIDMap, EditorIDMap);
 
 return;
 
