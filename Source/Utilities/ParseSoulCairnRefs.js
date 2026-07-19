@@ -10,8 +10,6 @@ let floraJSONFilename = 'Flora.json';
 let leveledItemJSONFilename = 'LeveledItems.json';
 let leveledCharacterJSONFilename = 'LeveledCharacters.json';
 let npcJSONFilename = 'NPCs.json';
-let discardRecords = ['ACTI', 'DOOR', 'FURN', 'IDLM', 'LIGH', 'MSTT','SOUN', 'STAT', 'TXST'];
-let keepRecords = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'CONT', 'FLOR', 'INGR', 'LVLI', 'MISC', 'NPC_',  'SCRL', 'SLGM', 'TREE', 'WEAP'];
 
 let itemsOfInterest = ['01DE5031'];
 
@@ -25,13 +23,17 @@ function getPaths(){
 	let refListPath = `${zEditOutputPath}/${referenceListFilename}`;
 	let swapPath = `${modPath}/${swapFilename}`;
 	let cdfPath = `${modPath}/SKSE/Plugins/ContainerDistributionFramework/${cdfFilename}`;
+	let contentsJSONPaths = [
+		`${zEditOutputPath}/${containerJSONFilename}`, `${zEditOutputPath}/${floraJSONFilename}`, `${zEditOutputPath}/${leveledCharacterJSONFilename}`, `${zEditOutputPath}/${leveledItemJSONFilename}`, `${zEditOutputPath}/${npcJSONFilename}`
+	];
 	return {
 		modPath,
 		zEditOutputPath,
 		recListPath,
 		refListPath,
 		swapPath,
-		cdfPath
+		cdfPath,
+		contentsJSONPaths,
 	};
 }
 function parseCSV(csvString, columnKeys, defaultValues=undefined, delimiter=','){
@@ -100,7 +102,6 @@ function loadReferenceList(path){
 	console.log(`Loaded data for ${ReferenceIDs.length} references.`);
 	return {ReferenceIDs, ReferenceDataMap};
 }
-//matches /(start of string)0x[1-6 hex digits]|(any valid filename characters).es[lmp](end of string)
 const loadOrder = [
 	'Skyrim.esm',
 	'Update.esm',
@@ -111,6 +112,7 @@ const loadOrder = [
 	'M.I.N.T.esp',
 	'SoulCairnUsesSigils.esp'
 ];
+//matches /(start of string)0x[1-6 hex digits]|(any valid filename characters).es[lmp](end of string)
 const cdfFormstringRegex = /^0x([0-9a-f]{1,6})\|([^\<\>\:\"\/\\\|\?\*]+.es[lmp])$/i;
 function parseFormID(FormIDMap, EditorIDMap, str){
 	if(str in FormIDMap) return str;
@@ -317,6 +319,43 @@ function filterItemNPCRecs(ReferenceIDs, ReferenceDataMap){
 	console.log(`Filtered to ${filteredIDs.length} references for deeper processing.`);
 	return filteredIDs;
 }
+const noInventoryRecs = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'INGR', 'MISC', 'SCRL', 'SLGM', 'WEAP'];
+function loadFormContentJSONS(jsonPaths, refs, FormIDMap){
+	let contents = {};
+	for(let i = 0; i < jsonPaths.length; i++){
+		let path = jsonPaths[i];
+		if(fs.existsSync(path)){
+			let file = fs.readFileSync(path, {encoding: 'utf8'});
+			try {
+				let data = JSON.parse(file);
+				Object.assign(contents, data);
+			}
+			catch (e){
+				console.log(`Failed to parse ${JSONPath}.`);
+			}
+		}
+	}
+	let baseFormIDs = refs.map(ref => ref.baseForm).filter(rec => !noInventoryRecs.includes(rec.signature))
+		.map(rec => rec.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
+	let missingIDs = baseFormIDs.filter(id => !(id in contents));
+	if(missingIDs.length > 0){
+		console.log(`Failed to find contents of ${missingIDs.length} objects.`);
+		let sigs = missingIDs.map(id => FormIDMap[id].signature)
+			.filter((value, index, array) => array.indexOf(value) === index).sort();
+		sigs.forEach(sig => {
+			let recs = missingIDs.filter(id => FormIDMap[id].signature === sig).map(id => {
+				let rec = FormIDMap[id];
+				if(rec.editorID !== null) return `${rec.editorID} (${rec.formID})`;
+				return rec.formID;
+			});
+			console.log(`${sig} (${recs.length} records):`);
+			console.log(recs.join(', '));
+		});
+		throw new Error(`Failed to find contents of ${missingIDs.length} objects. Load or exclude to continue.`);
+	}
+	console.log(`Loaded contents of all items.`);
+	return contents;
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
@@ -325,75 +364,27 @@ let bosRules = loadBaseObjectSwapper(paths.swapPath, FormIDMap, EditorIDMap);
 if(bosRules !== undefined) applyBaseObjectSwap(ReferenceIDs, ReferenceDataMap, FormIDMap, bosRules, (id) => FormIDMap[id].editorID === 'DLC1SoulCairnLocation');
 applyBaseDataToRefs(FormIDMap, ReferenceDataMap);//simplify ref data lookups now that bos swaps are applied
 let InvRefIDs = filterItemNPCRecs(ReferenceIDs, ReferenceDataMap);
+let formContents = loadFormContentJSONS(paths.contentsJSONPaths, InvRefIDs.map(id => ReferenceDataMap[id]), FormIDMap);
 
 let cdfRules = loadContainerDistributionFramework(paths.cdfPath, FormIDMap, EditorIDMap);
-
-return;
-
-function loadFormJSON(filename){
-	let JSONPath = `${paths.zEditOutputPath}/${filename}`;
-	let output = {};
-	if(fs.existsSync(JSONPath)) {
-		let file = fs.readFileSync(JSONPath, {encoding: 'utf8'});
-		try {
-			let data = JSON.parse(file);
-			output = data;
-			return output;
-		}
-		catch (e){
-			console.log(`Failed to parse ${JSONPath}.`);
-		}
-	}
-	return output;
-}
-let containerContents = loadFormJSON(containerJSONFilename);
-let floraContents = loadFormJSON(floraJSONFilename);
-let leveledNPCContents = loadFormJSON(leveledCharacterJSONFilename);
-let leveledItemContents = loadFormJSON(leveledItemJSONFilename);
-let npcContents = loadFormJSON(npcJSONFilename);
-
-//check that contents are loaded;
-let baseFormIDs = ReferenceIDs.map(id => ReferenceDataMap[id].baseForm.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
-//these items cannot contain other items.
-let skipSignatures = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'INGR', 'MISC', 'SCRL', 'SLGM', 'WEAP'];
-let contents = {};
-for(let i = 0; i < baseFormIDs.length; i++){
-	let id = baseFormIDs[i];
-	let baseForm = FormIDMap[id];
-	let signature = baseForm.signature;
-	if(skipSignatures.includes(signature)) continue;
-	if(signature === 'CONT' && id in containerContents) continue;
-	if(signature === 'FLOR' && id in floraContents) continue;
-	if(signature === 'LVLI' && id in leveledItemContents) continue;
-	if(signature === 'NPC_' && id in npcContents) continue;
-	if(signature === 'TREE' && id in floraContents) continue;
-	console.log(`${id} not found in loaded contents. Load or remove to proceed.`);
-	Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
-	return;
-}
-console.log(`Loaded contents of all items.`);
-let baseContentsMap = Object.fromEntries(baseFormIDs
-	.filter(id => !skipSignatures.includes(FormIDMap[id].signature))
-	.map(id => [id, containerContents[id], floraContents[id], leveledNPCContents[id], leveledItemContents[id], npcContents[id]])
-	.map(entries => entries.filter(v => v !== undefined)));
 
 //determine what forms must be resolved to resolve each item
 let inventoryDependencies = {};
 function getDependencies(id, signature){
-	if(skipSignatures.includes(signature)) return null;
+	if(noInventoryRecs.includes(signature)) return null;
 	let dependencies = [];
 	if(signature === 'CONT'){
-		let entries = baseContentsMap[id].entries;
+		let entries = formContents[id].entries;
 		dependencies = entries.map(e => e.item);
 	} else if(signature === 'FLOR' || signature === 'TREE') {
-		let plantItem = baseContentsMap[id];
+		let plantItem = formContents[id];
 		if(plantItem === '') return null;
 		return plantItem;
 	} else if(signature === 'LVLI' || signature === 'LVLN'){
-		let entries = baseContentsMap[id].entries;
+		let entries = formContents[id].entries;
 		dependencies = entries.map(e => e.item);
 	} else if(signature === 'NPC_'){
-		let npc = baseContentsMap[id];
+		let npc = formContents[id];
 		if(npc.templateNPC !== '' && npc.templateFlags.UseInventory){
 			let template = npc.templateNPC;
 			if(npc.templateNPC !== '') return template;
@@ -406,8 +397,8 @@ function getDependencies(id, signature){
 	if(dependencies.length === 0) return null;
 	return dependencies;
 }
-let requiredDependencies = baseFormIDs;
-let missingDependencies = baseFormIDs;
+let requiredDependencies = InvRefIDs.map(id => ReferenceDataMap[id].baseForm.formID);
+let missingDependencies = requiredDependencies;
 let pass = 0;
 while(missingDependencies.length > 0){
 	pass++;
@@ -428,10 +419,6 @@ while(missingDependencies.length > 0){
 		.filter((value, index, array) => array.indexOf(value) === index).sort();
 	missingDependencies = requiredDependencies.filter(id => inventoryDependencies[id] === undefined);
 	console.log(`Pass ${pass}: Identified ${requiredDependencies.length} dependencies. ${missingDependencies.length} remain.`);
-	missingDependencies.filter(id => !skipSignatures.includes(FormIDMap[id].signature))
-		.map(id => [id, containerContents[id], floraContents[id], leveledNPCContents[id], leveledItemContents[id], npcContents[id]])
-		.map(entries => entries.filter(v => v !== undefined))
-		.forEach(e => baseContentsMap[e[0]] = e[1]);
 }
 
 function resolveCalcOrder(ids){
@@ -467,22 +454,22 @@ let calcOrder = resolveCalcOrder(Object.keys(inventoryDependencies));
 
 let itemCanContainIOI = {};
 function getCanContainIOI(id, signature){
-	if(skipSignatures.includes(signature)) return itemsOfInterest.includes(id);
+	if(noInventoryRecs.includes(signature)) return itemsOfInterest.includes(id);
 	if(signature === "CONT"){
-		let items = baseContentsMap[id].entries.map(e => e.item);
+		let items = formContents[id].entries.map(e => e.item);
 		return items.some(e => itemCanContainIOI[e.item]);
 	}
 	if(signature === "FLOR" || signature === "TREE"){
-		let plantItem = baseContentsMap[id];
+		let plantItem = formContents[id];
 		if(plantItem === '') return false;
 		return itemCanContainIOI[plantItem];
 	}
 	if(signature === "LVLI" || signature === "LVLN"){
-		let items = baseContentsMap[id].entries.map(e => e.item);
+		let items = formContents[id].entries.map(e => e.item);
 		return items.some(e => itemCanContainIOI[e.item]);
 	}
 	if(signature === "NPC_"){
-		let npc = baseContentsMap[id];
+		let npc = formContents[id];
 		let npcFlags = npc.npcFlags;
 		let templateFlags = npc.templateFlags;
 		//player cannot loot this actor
