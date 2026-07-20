@@ -246,6 +246,78 @@ function applyBaseObjectSwap(RefIDs, ReferenceDataMap, FormIDMap, BOSRules, ByFi
 		}
 	}
 }
+function applyBaseDataToRefs(FormIDMap, ReferenceDataMap){
+	Object.values(ReferenceDataMap).forEach(ref => ref.baseForm = FormIDMap[ref.baseID]);
+}
+const worldOnlyRecs = ['ACTI', 'DOOR', 'FURN', 'IDLM', 'LIGH', 'MSTT','SOUN', 'STAT', 'TXST'];
+const itemAndNPCRecs = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'CONT', 'FLOR', 'INGR', 'LVLI', 'MISC', 'NPC_',  'SCRL', 'SLGM', 'TREE', 'WEAP'];
+function filterItemNPCRecs(ReferenceIDs, ReferenceDataMap){
+	let filteredIDs = ReferenceIDs.filter(id => !worldOnlyRecs.includes(ReferenceDataMap[id].baseForm.signature));
+	let baseSigs = filteredIDs.map(id => ReferenceDataMap[id].baseForm.signature)
+		.filter((value, index, array) => array.indexOf(value) === index).sort();
+	let unhandledSigs = baseSigs.filter(sig => !itemAndNPCRecs.includes(sig));
+	if(unhandledSigs.length > 0) throw new Error(`Some records with unchecked signatures are in the dataset. Label them as "world only" or "item and NPC" to continue.\n${unhandledSigs.join(', ')}`);
+	console.log(`Filtered to ${filteredIDs.length} references for deeper processing.`);
+	return filteredIDs;
+}
+const noInventoryRecs = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'INGR', 'MISC', 'SCRL', 'SLGM', 'WEAP'];
+function loadFormContentJSONS(jsonPaths, refs, FormIDMap){
+	let contents = {};
+	for(let i = 0; i < jsonPaths.length; i++){
+		let path = jsonPaths[i];
+		if(fs.existsSync(path)){
+			let file = fs.readFileSync(path, {encoding: 'utf8'});
+			try {
+				let data = JSON.parse(file);
+				Object.assign(contents, data);
+			}
+			catch (e){
+				console.log(`Failed to parse ${JSONPath}.`);
+			}
+		}
+	}
+	let baseFormIDs = refs.map(ref => ref.baseForm).filter(rec => !noInventoryRecs.includes(rec.signature))
+		.map(rec => rec.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
+	let missingIDs = baseFormIDs.filter(id => !(id in contents));
+	if(missingIDs.length > 0){
+		console.log(`Failed to find contents of ${missingIDs.length} objects.`);
+		let sigs = missingIDs.map(id => FormIDMap[id].signature)
+			.filter((value, index, array) => array.indexOf(value) === index).sort();
+		sigs.forEach(sig => {
+			let recs = missingIDs.filter(id => FormIDMap[id].signature === sig).map(id => {
+				let rec = FormIDMap[id];
+				if(rec.editorID !== null) return `${rec.editorID} (${rec.formID})`;
+				return rec.formID;
+			});
+			console.log(`${sig} (${recs.length} records):`);
+			console.log(recs.join(', '));
+		});
+		throw new Error(`Failed to find contents of ${missingIDs.length} objects. Load or exclude to continue.`);
+	}
+	console.log(`Loaded contents of all items.`);
+	//set some data real quick
+	//containers with no entries get null for entries field
+	Object.keys(contents).filter(id => FormIDMap[id].signature === 'CONT').map(id => contents[id])
+		.filter(rec => rec.entries && (typeof rec.entries === 'object') && Array.isArray(rec.entries) && rec.entries.length === 0)
+		.forEach(rec => rec.entries = null);
+	//plants and trees with no entries get null for value
+	let plantIDs = Object.keys(contents).filter(id => FormIDMap[id].signature === 'FLOR' || FormIDMap[id].signature === 'TREE');
+	plantIDs.filter(id => contents[id] === '').forEach(id => contents[id] = null);
+	//Leveled Items/Characters - empty globals to null
+	let leveledRecs = Object.keys(contents).filter(id => FormIDMap[id].signature === 'LVLI' || FormIDMap[id].signature === 'LVLN');
+	leveledRecs.filter(id => contents[id].chanceNoneGlob === '').forEach(id => contents[id].chanceNoneGlob = null);
+	//Leveled Items/Characters - entry empties to null
+	leveledRecs.map(id => contents[id])
+		.filter(rec => rec.entries && (typeof rec.entries === 'object') && Array.isArray(rec.entries) && rec.entries.length === 0)
+		.forEach(rec => rec.entries = null);
+	//Actors - template npcs to null and empty inventories to null
+	let actors = Object.keys(contents).filter(id => FormIDMap[id].signature === 'NPC_');
+	actors.map(id => contents[id]).filter(rec => rec.templateNPC === '').forEach(rec => rec.templateNPC = null);
+	actors.map(id => contents[id])
+		.filter(rec => rec.inventoryEntries && (typeof rec.inventoryEntries === 'object') && Array.isArray(rec.inventoryEntries) && rec.inventoryEntries.length === 0)
+		.forEach(rec => rec.inventoryEntries = null);
+	return contents;
+}
 function loadContainerDistributionFramework(path, FormIDMap, EditorIDMap){
 	if(!fs.existsSync(path)){
 		console.log(`${cdfFilename} not found at expected path\n${path}\nContainer distribution will not be applied.`);
@@ -299,62 +371,111 @@ function loadContainerDistributionFramework(path, FormIDMap, EditorIDMap){
 			}
 			throw new Error(`Failed to parse rule type from rule ${name} in ${cdfFilename}.`);
 		}
-		let conditions = rule.conditions;
+		let conditions = {
+			playerSkills: null,
+			containers: null,
+			globals: null,
+			locations: null,
+			locationKeywords: null,
+			references: null,
+			worldspaces: null,
+			plugins: null,
+			bypassUnsafeContainers: null,
+			allowVendors: null,
+			onlyVendors: null,
+			randomAdd: null
+		};
+		let jsonConditions = Object.keys(rule.conditions);
+		for(let j = 0; j < jsonConditions.length; j++){
+			let key = jsonConditions[j];
+			let value = rule.conditions[key];
+			let invert = key.startsWith('!');
+			let targetKey = invert? key.substring(1) : key;
+			if(key === 'playerSkills' || key === '!playerSkills') throw new Error(`CDF condition type Actor Value not implemented.`);
+			if(key === 'globals' || key === '!globals') throw new Error(`CDF condition type Global Variables not implemented.`);
+			if(key === 'containers' || key === '!containers' || key === 'locations' || key === '!locations') {
+				let formIDs = value.map(str => parseFormID(FormIDMap, EditorIDMap, str));
+				formIDs.forEach((id, index) => {
+					if(id === undefined) throw new Error(`Failed to parse FormID from ${key}: ${value[index]} in rule ${name} in ${cdfFilename}.`);
+				});
+				conditions[targetKey] = {invert, formIDs};
+				continue;
+			}
+			if(key === 'locationKeywords' || key === '!locationKeywords') throw new Error(`CDF condition type Location Keywords not implemented.`);
+			if(key === 'references' || key === '!references') throw new Error(`CDF condition type References not implemented.`);
+			//quest case - bother sparrow more about this
+			if(key === 'worldspaces' || key === '!worldspaces') throw new Error(`CDF condition type Worldspaces not implemented.`);
+			if(key === 'plugins') throw new Error(`CDF condition type Active Plugins not implemented.`);
+			if(key === 'bypassUnsafeContainers' || key === 'allowVendors' || key === 'onlyVendors' || key === 'randomAdd'){
+				if(value !== true && value !== false) throw new Error(`CDF condition error: expected bool, found ${key}: ${value} in ${rule} in ${cdfFilename}`);
+				conditions[key] = value;
+				continue;
+			}
+			throw new Error(`Unhandled condition case ${key} in rule ${name} in ${cdfFilename}.`);
+		}
 		rules.push({name, changes, conditions});
 	}
 	console.log(`Loaded ${rules.length} Container Distribution Framework rule${rules.length > 1? 's': ''} from ${cdfFilename}.`);
 	return rules;
 }
-function applyBaseDataToRefs(FormIDMap, ReferenceDataMap){
-	Object.values(ReferenceDataMap).forEach(ref => ref.baseForm = FormIDMap[ref.baseID]);
-}
-const worldOnlyRecs = ['ACTI', 'DOOR', 'FURN', 'IDLM', 'LIGH', 'MSTT','SOUN', 'STAT', 'TXST'];
-const itemAndNPCRecs = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'CONT', 'FLOR', 'INGR', 'LVLI', 'MISC', 'NPC_',  'SCRL', 'SLGM', 'TREE', 'WEAP'];
-function filterItemNPCRecs(ReferenceIDs, ReferenceDataMap){
-	let filteredIDs = ReferenceIDs.filter(id => !worldOnlyRecs.includes(ReferenceDataMap[id].baseForm.signature));
-	let baseSigs = filteredIDs.map(id => ReferenceDataMap[id].baseForm.signature)
-		.filter((value, index, array) => array.indexOf(value) === index).sort();
-	let unhandledSigs = baseSigs.filter(sig => !itemAndNPCRecs.includes(sig));
-	if(unhandledSigs.length > 0) throw new Error(`Some records with unchecked signatures are in the dataset. Label them as "world only" or "item and NPC" to continue.\n${unhandledSigs.join(', ')}`);
-	console.log(`Filtered to ${filteredIDs.length} references for deeper processing.`);
-	return filteredIDs;
-}
-const noInventoryRecs = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'INGR', 'MISC', 'SCRL', 'SLGM', 'WEAP'];
-function loadFormContentJSONS(jsonPaths, refs, FormIDMap){
-	let contents = {};
-	for(let i = 0; i < jsonPaths.length; i++){
-		let path = jsonPaths[i];
-		if(fs.existsSync(path)){
-			let file = fs.readFileSync(path, {encoding: 'utf8'});
-			try {
-				let data = JSON.parse(file);
-				Object.assign(contents, data);
-			}
-			catch (e){
-				console.log(`Failed to parse ${JSONPath}.`);
-			}
+function applyCDFAddToContainers(FormIDMap, contentsMap, rules, scenario){
+	let defaultScenario = {
+		playerSkills: null,
+		globals: null,
+		locations: null,
+		locationKeywords: null,
+		references: null,
+		worldspaces: null,
+		plugins: null
+	};
+	if(scenario === undefined) scenario = {};
+	let thisScenario = Object.assign({}, defaultScenario);
+	Object.keys(defaultScenario).filter(k => k in scenario).forEach(k => thisScenario[k] = scenario[k]);
+	//TODO: bypass unsafe containers is not handled, the behavior for this is ignored
+	const handledKeys = ['containers', 'locations', 'bypassUnsafeContainers'];
+	//console.log(rules);
+	let changesToApply = [];
+	for(let i = 0; i < rules.length; i++){
+		let rule = rules[i];
+		let conditions = rule.conditions;
+		let conditionsApplied = Object.keys(conditions).filter(k => conditions[k] !== null);
+		conditionsApplied.forEach(k => {
+			if(!handledKeys.includes(k)) throw new Error(`Unhandled CDF condition ${k}`);
+		});
+		for(let j = 0; j < rule.changes.length; j++){
+			let change = rule.changes[j];
+			if(change.ruleType === 'Add') changesToApply.push({conditions, change});
 		}
 	}
-	let baseFormIDs = refs.map(ref => ref.baseForm).filter(rec => !noInventoryRecs.includes(rec.signature))
-		.map(rec => rec.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
-	let missingIDs = baseFormIDs.filter(id => !(id in contents));
-	if(missingIDs.length > 0){
-		console.log(`Failed to find contents of ${missingIDs.length} objects.`);
-		let sigs = missingIDs.map(id => FormIDMap[id].signature)
-			.filter((value, index, array) => array.indexOf(value) === index).sort();
-		sigs.forEach(sig => {
-			let recs = missingIDs.filter(id => FormIDMap[id].signature === sig).map(id => {
-				let rec = FormIDMap[id];
-				if(rec.editorID !== null) return `${rec.editorID} (${rec.formID})`;
-				return rec.formID;
-			});
-			console.log(`${sig} (${recs.length} records):`);
-			console.log(recs.join(', '));
-		});
-		throw new Error(`Failed to find contents of ${missingIDs.length} objects. Load or exclude to continue.`);
+	for(let i = 0; i < changesToApply.length; i++){
+		let rule = changesToApply[i];
+		let conditionsToCheck = Object.keys(rule.conditions).filter(k => rule.conditions[k] !== null)
+			.filter(k => k !== 'containers' && k !== 'bypassUnsafeContainers');
+		if(conditionsToCheck.length > 0) throw new Error('Unhandled case: ' + conditionsToCheck.join(','));
+		//above should be checked against scenario, but that isn't implemented here
+		let containersCondition = rule.conditions.containers ?? [];
+		let containers = containersCondition.formIDs;
+		if(containersCondition.invert){
+			containers = Object.values(FormIDMap).filter(rec => rec.signature === 'CONT').map(rec => rec.formID)
+				.filter(id => !containers.includes(id));
+		}
+		for(let j = 0; j < containers.length; j++){
+			let container = contentsMap[containers[j]];
+			if(container.entries === null){
+				container.entries = rule.change.add.map(id => ({item: id, count: 1}));
+			} else {
+				rule.change.add.forEach(id => {
+					let entry = container.entries.find(e => e.item === id);
+					if(entry !== undefined){
+						entry.count += rule.change.count;
+						return;
+					}
+					container.entries.push({item: id, count: rule.change.count});
+				});
+			}
+		}
+		console.log(`Applied CDF add by base container (${rule.change.add.join(', ')}) -> (${containers.join(', ')}): added ${rule.change.add.length} item${rule.change.add.length > 1? 's': ''} to ${containers.length} containers.`);
 	}
-	console.log(`Loaded contents of all items.`);
-	return contents;
 }
 
 let paths = getPaths();
@@ -367,6 +488,9 @@ let InvRefIDs = filterItemNPCRecs(ReferenceIDs, ReferenceDataMap);
 let formContents = loadFormContentJSONS(paths.contentsJSONPaths, InvRefIDs.map(id => ReferenceDataMap[id]), FormIDMap);
 
 let cdfRules = loadContainerDistributionFramework(paths.cdfPath, FormIDMap, EditorIDMap);
+if(cdfRules !== undefined) applyCDFAddToContainers(FormIDMap, formContents, cdfRules);
+
+return;
 
 //determine what forms must be resolved to resolve each item
 let inventoryDependencies = {};
@@ -499,3 +623,5 @@ for(let i = 0; i < calcOrder.length; i++){
 //update relevant containers
 //filter baseids to only items that can contain IOI
 //log those, then forecast
+//container flags?
+//TODO: see applyCDFAddToContainers
