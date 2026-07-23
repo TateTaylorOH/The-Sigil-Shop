@@ -74,6 +74,7 @@ let data = Object.fromEntries(recs.map(rec => {
 		.map(f => templateFlagKeys[f])
 		.filter(f => f !== undefined)
 		.forEach(f => templateFlags[f] = true);
+	let deathItem = xelib.HasElement(rec, 'INAM')? xelib.GetHexFormID(xelib.GetLinksTo(rec, 'INAM')) : '';
 	let templateNPC = xelib.HasElement(rec, 'TPLT')? xelib.GetHexFormID(xelib.GetLinksTo(rec, 'TPLT')) : '';
 	let inventoryEntries = xelib.HasElement(rec, 'Items')?
 		xelib.GetElements(rec, 'Items')
@@ -82,7 +83,7 @@ let data = Object.fromEntries(recs.map(rec => {
 			let count = xelib.GetIntValue(e, 'CNTO\\Count');
 			return {item, count};
 		}) : [];
-	let obj = {formID, editorID, npcFlags, templateFlags, templateNPC, inventoryEntries};
+	let obj = {formID, editorID, npcFlags, templateFlags, deathItem, templateNPC, inventoryEntries};
 	return [formID, obj];
 }));
 fh.saveJsonFile('C:/Games/Tools/MO2/profiles/Skyrim Special Edition/mods/The-Sigil-Shop/Source/Utilities/zEdit/NPCs.json', data);

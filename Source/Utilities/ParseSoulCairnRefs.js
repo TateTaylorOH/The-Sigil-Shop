@@ -314,6 +314,7 @@ function loadFormContentJSONS(jsonPaths, refs, FormIDMap){
 		.forEach(rec => rec.entries = null);
 	//Actors - template npcs to null and empty inventories to null
 	let actors = Object.keys(contents).filter(id => FormIDMap[id].signature === 'NPC_');
+	actors.map(id => contents[id]).filter(rec => rec.deathItem === '').forEach(rec => rec.deathItem = null);
 	actors.map(id => contents[id]).filter(rec => rec.templateNPC === '').forEach(rec => rec.templateNPC = null);
 	actors.map(id => contents[id])
 		.filter(rec => rec.inventoryEntries && (typeof rec.inventoryEntries === 'object') && Array.isArray(rec.inventoryEntries) && rec.inventoryEntries.length === 0)
@@ -506,8 +507,10 @@ function getSingleRecDependencies(id, signature, contentsMap){
 	if(signature === 'FLOR' || signature === 'TREE') return contentsMap[id];
 	if(signature === 'NPC_'){
 		let npc = contentsMap[id];
-		if(npc.templateNPC !== null && npc.templateFlags.UseInventory) return npc.templateNPC;
-		dependencies = (npc.inventoryEntries ?? []).map(e => e.item).sort();
+		if(npc.templateNPC !== null && (npc.templateFlags.UseInventory || npc.templateFlags.UseTraits)) return npc.templateNPC;
+		dependencies = (npc.inventoryEntries ?? []).map(e => e.item);
+		if(npc.deathItem !== null) dependencies.push(npc.deathItem);
+		dependencies.sort();
 	}
 	if(dependencies !== undefined && dependencies.length === 0) return null;
 	return dependencies;
@@ -573,6 +576,47 @@ function resolveCalcOrder(dependencies){
 	}
 	return calcOrder;
 }
+function getFormCanContainItems(itemsToCheck, contentsMap, canContainMap, id, signature){
+	if(itemsToCheck.includes(id)) return true;
+	if(noInventoryRecs.includes(signature)) return false;
+	if(signature === 'CONT' || signature === 'LVLI' || signature === 'LVLN'){
+		let entries = contentsMap[id].entries;
+		if(entries === null) return false;
+		return entries.map(v => v.item).some(v => canContainMap[v]);
+	}
+	if(signature === 'FLOR' || signature === 'TREE'){
+		if(contentsMap[id] === null) return false;
+		return canContainMap[contentsMap[id]];
+	}
+	if(signature === 'NPC_'){
+		let npc = contentsMap[id];
+		let unlootable = npc.npcFlags.Essential || npc.npcFlags.IsGhost || npc.npcFlags.Invulnerable;
+		if(unlootable) return false;
+		//death items are controlled by use traits
+		if(npc.templateNPC !== null && (npc.templateFlags.UseInventory || npc.templateFlags.UseTraits) && canContainMap[npc.templateNPC]) return true;
+		let items = npc.inventoryEntries ?? [];
+		if(npc.deathItem !== null) items.push(npc.deathItem);
+		if(items.length === 0) return false;
+		return items.some(v => canContainMap[v]);
+	}
+}
+function getAllFormsContainingItems(itemsToCheck, FormIDMap, contentsMap, calcOrder){
+	let formContainsItems = {};
+	let itemsString = itemsToCheck.length === 1? itemsToCheck[0] : `[${itemsToCheck.join(', ')}]`;
+	for(let i = 0, n = calcOrder.length; i < n; i++){
+		let id = calcOrder[i], sig = FormIDMap[id].signature;
+		let canContainItems = getFormCanContainItems(itemsToCheck, contentsMap, formContainsItems, id, sig);
+		if(canContainItems !== undefined){
+			formContainsItems[id] = canContainItems;
+			continue;
+		}
+		console.log(FormIDMap[id]);
+		throw new Error(`(${i+1}/${n}) Failed to evaluate if form ${id} can contain items ${itemsString}.`);
+	}
+	let idsWithItems = calcOrder.filter(id => formContainsItems[id]);
+	console.log(`Identified ${idsWithItems.length} forms that can contain ${itemsString}.`);
+	return idsWithItems;
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
@@ -589,49 +633,8 @@ if(cdfRules !== undefined) broadIOI = getItemsOfInterestCDF(itemsOfInterest, cdf
 let inventoryDependencies = getInventoryDependencies(InvRefIDs.map(id => ReferenceDataMap[id].baseForm.formID), FormIDMap, formContents);
 let calcOrder = resolveCalcOrder(inventoryDependencies);
 
-let itemCanContainIOI = {};
-function getCanContainIOI(id, signature){
-	if(noInventoryRecs.includes(signature)) return itemsOfInterest.includes(id);
-	if(signature === "CONT" || signature === "LVLI" || signature === "LVLN"){
-		let items = formContents[id].entries;
-		if(items === null) return false;
-		return items.map(e => e.item).some(e => itemCanContainIOI[e.item]);
-	}
-	if(signature === "FLOR" || signature === "TREE"){
-		let plantItem = formContents[id];
-		if(plantItem === null) return false;
-		return itemCanContainIOI[plantItem];
-	}
-	if(signature === "NPC_"){
-		let npc = formContents[id];
-		let npcFlags = npc.npcFlags;
-		let templateFlags = npc.templateFlags;
-		//player cannot loot this actor
-		if(npcFlags.Essential || npcFlags.IsGhost || npcFlags.Invulnerable) return false;
-		let inventory = npc.inventoryEntries;
-		if(npc.templateNPC !== '' && npc.templateFlags.UseInventory) {
-			let templateNPC = npc.templateNPC;
-			return itemCanContainIOI[templateNPC];
-		}
-		if(inventory === null) return false;
-		return inventory.some(e => itemCanContainIOI[e.item]);
-	}
-}
-for(let i = 0; i < calcOrder.length; i++){
-	let id = calcOrder[i];
-	let baseForm = FormIDMap[id];
-	let canContainIOI = getCanContainIOI(id, baseForm.signature);
-	if(canContainIOI !== undefined){
-		itemCanContainIOI[id] = canContainIOI;
-		continue;
-	}
-	console.log(`(${i+1}/${calcOrder.length}) Could not determine if ${id} can contain items of interest.`);
-	Object.entries(baseForm).forEach(e => console.log(`${e[0]}: ${e[1]}`));
-	return;
-}
-//filter by items that can contain our items of interest IOI
-//load CDF config
-//update relevant containers
+let itemsThatCanContainSigils = getAllFormsContainingItems(broadIOI, FormIDMap, formContents, calcOrder);
+
 //filter baseids to only items that can contain IOI
 //log those, then forecast
 //container flags?
