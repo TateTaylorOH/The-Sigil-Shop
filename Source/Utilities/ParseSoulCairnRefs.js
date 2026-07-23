@@ -13,6 +13,8 @@ let npcJSONFilename = 'NPCs.json';
 
 let itemsOfInterest = ['01DE5031'];
 
+let isFirstOccurrence = (value, index, array) => array.indexOf(value) === index;
+
 function getPaths(){
 	let pathParts = __dirname.split('\\'), lowerParts = pathParts.map(s => s.toLowerCase()), lowerName = modName.toLowerCase();
 	let modPartIndex = lowerParts.findIndex(s => s === lowerName);
@@ -254,7 +256,7 @@ const itemAndNPCRecs = ['ALCH', 'AMMO', 'ARMO', 'BOOK', 'CONT', 'FLOR', 'INGR', 
 function filterItemNPCRecs(ReferenceIDs, ReferenceDataMap){
 	let filteredIDs = ReferenceIDs.filter(id => !worldOnlyRecs.includes(ReferenceDataMap[id].baseForm.signature));
 	let baseSigs = filteredIDs.map(id => ReferenceDataMap[id].baseForm.signature)
-		.filter((value, index, array) => array.indexOf(value) === index).sort();
+		.filter(isFirstOccurrence).sort();
 	let unhandledSigs = baseSigs.filter(sig => !itemAndNPCRecs.includes(sig));
 	if(unhandledSigs.length > 0) throw new Error(`Some records with unchecked signatures are in the dataset. Label them as "world only" or "item and NPC" to continue.\n${unhandledSigs.join(', ')}`);
 	console.log(`Filtered to ${filteredIDs.length} references for deeper processing.`);
@@ -277,12 +279,12 @@ function loadFormContentJSONS(jsonPaths, refs, FormIDMap){
 		}
 	}
 	let baseFormIDs = refs.map(ref => ref.baseForm).filter(rec => !noInventoryRecs.includes(rec.signature))
-		.map(rec => rec.formID).filter((value, index, array) => array.indexOf(value) === index).sort();
+		.map(rec => rec.formID).filter(isFirstOccurrence).sort();
 	let missingIDs = baseFormIDs.filter(id => !(id in contents));
 	if(missingIDs.length > 0){
 		console.log(`Failed to find contents of ${missingIDs.length} objects.`);
 		let sigs = missingIDs.map(id => FormIDMap[id].signature)
-			.filter((value, index, array) => array.indexOf(value) === index).sort();
+			.filter(isFirstOccurrence).sort();
 		sigs.forEach(sig => {
 			let recs = missingIDs.filter(id => FormIDMap[id].signature === sig).map(id => {
 				let rec = FormIDMap[id];
@@ -477,6 +479,68 @@ function applyCDFAddToContainers(FormIDMap, contentsMap, rules, scenario){
 		console.log(`Applied CDF add by base container (${rule.change.add.join(', ')}) -> (${containers.join(', ')}): added ${rule.change.add.length} item${rule.change.add.length > 1? 's': ''} to ${containers.length} containers.`);
 	}
 }
+function getItemsOfInterestCDF(origIOI, rules){
+	let changes = rules.map(rule => rule.changes).flat();
+	let newIOI = origIOI.map(e => e);
+	for(let i = 0; i < changes.length; i++){
+		let rule = changes[i];
+		if(rule.ruleType === 'Add'){
+			newIOI = newIOI.concat(rule.add);
+			continue;
+		}
+		if(rule.ruleType === 'Replace'){
+			newIOI.push(rule.remove);
+			newIOI = newIOI.concat(rule.add);
+			continue;
+		}
+		throw new Error(`Unhandled CDF rule type ${rule.ruleType}.`);
+	}
+	newIOI = newIOI.filter(isFirstOccurrence).sort();
+	console.log(`Evaluated CDF items of interest. Included ${newIOI.length - origIOI.length} additional items in the broader set.`);
+	return newIOI;
+}
+function getSingleRecDependencies(id, signature, contentsMap){
+	if(noInventoryRecs.includes(signature)) return null;
+	let dependencies;
+	if(signature === 'CONT' || signature === 'LVLI' || signature === 'LVLN') dependencies = (contentsMap[id].entries ?? []).map(e => e.item).filter(isFirstOccurrence).sort();
+	if(signature === 'FLOR' || signature === 'TREE') return contentsMap[id];
+	if(signature === 'NPC_'){
+		let npc = contentsMap[id];
+		if(npc.templateNPC !== null && npc.templateFlags.UseInventory) return npc.templateNPC;
+		dependencies = (npc.inventoryEntries ?? []).map(e => e.item).sort();
+	}
+	if(dependencies !== undefined && dependencies.length === 0) return null;
+	return dependencies;
+}
+function getInventoryDependencies(baseIDs, FormIDMap, contentsMap){
+	let inventoryDependencies = {};
+	//starting values of required/missing dependencies
+	let initialDependencies = baseIDs.filter(isFirstOccurrence);
+	let requiredDependencies = initialDependencies, missingDependencies = initialDependencies;
+	let pass = 0, n = missingDependencies.length;
+	while(n > 0){
+		pass++;
+		if(pass === 1) console.log(`Dependency pass ${pass}: Evaluating inventory dependencies for ${n} forms.`);
+		for(let i = 0; i < n; i++){
+			let id = missingDependencies[i], baseForm = FormIDMap[id], sig = baseForm.signature;
+			let dependencies = getSingleRecDependencies(id, sig, contentsMap);
+			if(dependencies !== undefined){
+				inventoryDependencies[id] = dependencies;
+				continue;
+			}
+			console.log(`(${i+1}/${n}) Failed to get dependencies of form ${id}.`);
+			Object.entries(baseForm).forEach(v => console.log(`${v[0]}: ${v[1]}`));
+			throw new Error(`Handle depedencies of form ${id} to continue.`);
+		}
+		requiredDependencies = initialDependencies.concat(Object.values(inventoryDependencies))
+			.filter(v => v !== null).flat().filter(isFirstOccurrence).sort();
+		missingDependencies = requiredDependencies.filter(id => inventoryDependencies[id] === undefined);
+		n = missingDependencies.length;
+		if(n > 0) console.log(`Dependency pass ${pass}: Identified ${requiredDependencies.length} total dependencies. ${n} must be checked.`);
+	}
+	console.log(`Identified dependencies for ${Object.keys(inventoryDependencies).length} forms.`);
+	return inventoryDependencies;
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
@@ -486,64 +550,11 @@ if(bosRules !== undefined) applyBaseObjectSwap(ReferenceIDs, ReferenceDataMap, F
 applyBaseDataToRefs(FormIDMap, ReferenceDataMap);//simplify ref data lookups now that bos swaps are applied
 let InvRefIDs = filterItemNPCRecs(ReferenceIDs, ReferenceDataMap);
 let formContents = loadFormContentJSONS(paths.contentsJSONPaths, InvRefIDs.map(id => ReferenceDataMap[id]), FormIDMap);
-
 let cdfRules = loadContainerDistributionFramework(paths.cdfPath, FormIDMap, EditorIDMap);
 if(cdfRules !== undefined) applyCDFAddToContainers(FormIDMap, formContents, cdfRules);
-
-return;
-
-//determine what forms must be resolved to resolve each item
-let inventoryDependencies = {};
-function getDependencies(id, signature){
-	if(noInventoryRecs.includes(signature)) return null;
-	let dependencies = [];
-	if(signature === 'CONT'){
-		let entries = formContents[id].entries;
-		dependencies = entries.map(e => e.item);
-	} else if(signature === 'FLOR' || signature === 'TREE') {
-		let plantItem = formContents[id];
-		if(plantItem === '') return null;
-		return plantItem;
-	} else if(signature === 'LVLI' || signature === 'LVLN'){
-		let entries = formContents[id].entries;
-		dependencies = entries.map(e => e.item);
-	} else if(signature === 'NPC_'){
-		let npc = formContents[id];
-		if(npc.templateNPC !== '' && npc.templateFlags.UseInventory){
-			let template = npc.templateNPC;
-			if(npc.templateNPC !== '') return template;
-			throw new Error(`Invalid inventory flag state on templated NPC ${id} (no template assigned).`);
-		}
-		dependencies = npc.inventoryEntries.map(e => e.item);
-	} else {
-		return undefined;
-	}
-	if(dependencies.length === 0) return null;
-	return dependencies;
-}
-let requiredDependencies = InvRefIDs.map(id => ReferenceDataMap[id].baseForm.formID);
-let missingDependencies = requiredDependencies;
-let pass = 0;
-while(missingDependencies.length > 0){
-	pass++;
-	for(let i = 0; i < missingDependencies.length; i++){
-		let id = missingDependencies[i];
-		let signature = FormIDMap[id].signature;
-		let dependencies = getDependencies(id, signature);
-		if(dependencies !== undefined){
-			inventoryDependencies[id] = dependencies;
-			continue;
-		}
-		console.log(`Contents of ${id} not handled. Calc order not determined.`);
-		Object.entries(FormIDMap[id]).forEach(e => console.log(`${e[0]}: ${e[1]}`));
-		return;
-	}
-	requiredDependencies = Object.values(inventoryDependencies)
-		.filter(v => v !== null).flat()
-		.filter((value, index, array) => array.indexOf(value) === index).sort();
-	missingDependencies = requiredDependencies.filter(id => inventoryDependencies[id] === undefined);
-	console.log(`Pass ${pass}: Identified ${requiredDependencies.length} dependencies. ${missingDependencies.length} remain.`);
-}
+let broadIOI = itemsOfInterest;
+if(cdfRules !== undefined) broadIOI = getItemsOfInterestCDF(itemsOfInterest, cdfRules);
+let inventoryDependencies = getInventoryDependencies(InvRefIDs.map(id => ReferenceDataMap[id].baseForm.formID), FormIDMap, formContents);
 
 function resolveCalcOrder(ids){
 	let calcOrder = [];
@@ -579,18 +590,15 @@ let calcOrder = resolveCalcOrder(Object.keys(inventoryDependencies));
 let itemCanContainIOI = {};
 function getCanContainIOI(id, signature){
 	if(noInventoryRecs.includes(signature)) return itemsOfInterest.includes(id);
-	if(signature === "CONT"){
-		let items = formContents[id].entries.map(e => e.item);
-		return items.some(e => itemCanContainIOI[e.item]);
+	if(signature === "CONT" || signature === "LVLI" || signature === "LVLN"){
+		let items = formContents[id].entries;
+		if(items === null) return false;
+		return items.map(e => e.item).some(e => itemCanContainIOI[e.item]);
 	}
 	if(signature === "FLOR" || signature === "TREE"){
 		let plantItem = formContents[id];
-		if(plantItem === '') return false;
+		if(plantItem === null) return false;
 		return itemCanContainIOI[plantItem];
-	}
-	if(signature === "LVLI" || signature === "LVLN"){
-		let items = formContents[id].entries.map(e => e.item);
-		return items.some(e => itemCanContainIOI[e.item]);
 	}
 	if(signature === "NPC_"){
 		let npc = formContents[id];
@@ -603,6 +611,7 @@ function getCanContainIOI(id, signature){
 			let templateNPC = npc.templateNPC;
 			return itemCanContainIOI[templateNPC];
 		}
+		if(inventory === null) return false;
 		return inventory.some(e => itemCanContainIOI[e.item]);
 	}
 }
