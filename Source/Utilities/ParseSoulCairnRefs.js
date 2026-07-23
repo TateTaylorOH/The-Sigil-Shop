@@ -501,7 +501,7 @@ function getItemsOfInterestCDF(origIOI, rules){
 	return newIOI;
 }
 function getSingleRecDependencies(id, signature, contentsMap){
-	if(noInventoryRecs.includes(signature)) return null;
+	if(worldOnlyRecs.includes(signature) || noInventoryRecs.includes(signature)) return null;
 	let dependencies;
 	if(signature === 'CONT' || signature === 'LVLI' || signature === 'LVLN') dependencies = (contentsMap[id].entries ?? []).map(e => e.item).filter(isFirstOccurrence).sort();
 	if(signature === 'FLOR' || signature === 'TREE') return contentsMap[id];
@@ -578,7 +578,7 @@ function resolveCalcOrder(dependencies){
 }
 function getFormCanContainItems(itemsToCheck, contentsMap, canContainMap, id, signature){
 	if(itemsToCheck.includes(id)) return true;
-	if(noInventoryRecs.includes(signature)) return false;
+	if(worldOnlyRecs.includes(signature) || noInventoryRecs.includes(signature)) return false;
 	if(signature === 'CONT' || signature === 'LVLI' || signature === 'LVLN'){
 		let entries = contentsMap[id].entries;
 		if(entries === null) return false;
@@ -594,7 +594,7 @@ function getFormCanContainItems(itemsToCheck, contentsMap, canContainMap, id, si
 		if(unlootable) return false;
 		//death items are controlled by use traits
 		if(npc.templateNPC !== null && (npc.templateFlags.UseInventory || npc.templateFlags.UseTraits) && canContainMap[npc.templateNPC]) return true;
-		let items = npc.inventoryEntries ?? [];
+		let items = (npc.inventoryEntries ?? []).map(v => v);
 		if(npc.deathItem !== null) items.push(npc.deathItem);
 		if(items.length === 0) return false;
 		return items.some(v => canContainMap[v]);
@@ -617,6 +617,115 @@ function getAllFormsContainingItems(itemsToCheck, FormIDMap, contentsMap, calcOr
 	console.log(`Identified ${idsWithItems.length} forms that can contain ${itemsString}.`);
 	return idsWithItems;
 }
+const standardContents = {
+	formID: undefined,
+	signature: undefined,
+	editorID: undefined,
+	chanceNone: undefined,
+	flags: undefined,
+	template: undefined,
+	deathItem: undefined,
+	entries: undefined
+};
+const applyStandardContents = (formData) => Object.assign({}, standardContents, formData);
+const standardContentsFlags = {
+	AllLevelsLTOE: null,
+	ForEachItem: null,
+	UseAll: null,
+	SpecialLoot: null,
+	UseTemplateInventory: null,
+	UseTemplateTraits: null
+};
+const applyStandardFlags = (flags) => Object.assign({}, standardContentsFlags, (flags ?? {}));
+const standardEntry = {
+	level: undefined,
+	item: undefined,
+	count: undefined
+};
+const applyStandardEntry = (entry, e2) => Object.assign({}, standardEntry, (entry ?? {}), (e2 ?? {}))
+function standardizeContents(ids, FormIDMap, contentsMap){
+	let standardizedContents = {};
+	for(let i = 0, n = ids.length; i < n; i++){
+		let id = ids[i], formData = FormIDMap[id], contents = contentsMap[id];
+		if(noInventoryRecs.includes(formData.signature)) continue;
+		let itemContents = applyStandardContents(formData);
+		if(formData.signature === 'CONT'){
+			Object.assign(itemContents, {
+				chanceNone: null,
+				flags: applyStandardFlags(),
+				template: null,
+				deathItem: null,
+				entries: contents.entries.map(e => applyStandardEntry(e, {level: 1}))
+			});
+		}
+		if(formData.signature === 'FLOR'){
+			Object.assign(itemContents, {
+				chanceNone: null,
+				flags: applyStandardFlags(),
+				template: null,
+				deathItem: null,
+				entries: applyStandardEntry({level: 1, item: contents, count: 1})
+			});
+		}
+		if(formData.signature === 'LVLI'){
+			Object.assign(itemContents, {
+				chanceNone: contents.chanceNoneGlob ?? contents.chanceNoneInt,
+				flags: applyStandardFlags(contents.flags),
+				template: null,
+				deathItem: null,
+				entries: contents.entries
+			});
+		}
+		if(formData.signature === 'LVLN'){
+			Object.assign(itemContents, {
+				chanceNone: contents.chanceNoneGlob ?? contents.chanceNoneInt,
+				flags: applyStandardFlags(contents.flags),
+				template: null,
+				deathItem: null,
+				entries: contents.entries
+			});
+		}
+		if(formData.signature === 'NPC_'){
+			Object.assign(itemContents, {
+				chanceNone: null,
+				flags: applyStandardFlags({UseTemplateInventory: contents.templateFlags.UseInventory, UseTemplateTraits: contents.templateFlags.UseTraits}),
+				template: contents.templateNPC,
+				deathItem: contents.deathItem,
+				entries: contents.inventoryEntries === null? null : contents.inventoryEntries.map(e => applyStandardEntry(e, {level: 1}))
+			});
+		}
+		Object.keys(standardContents).forEach(k => {
+			if(itemContents[k] === undefined) {
+				console.log(contents);
+				console.log(itemContents);
+				throw new Error(`(${i+1}/${n}) Unhandled case on form ${id}.`);
+			}
+			if(typeof itemContents[k] === 'object'){
+				let obj = itemContents[k];
+				if(obj === null) return;
+				if(Array.isArray(obj)){
+					obj.forEach(e => Object.keys(e).forEach(sk => {
+						if(e[sk] === undefined){
+							console.log(contents);
+							console.log(itemContents);
+							throw new Error(`(${i+1}/${n}) Unhandled case on form ${id}.`);
+						}
+					}));
+				}
+				let subkeys = Object.keys(obj);
+				subkeys.forEach(sk => {
+					if(obj[sk] === undefined){
+						console.log(contents);
+						console.log(itemContents);
+						throw new Error(`(${i+1}/${n}) Unhandled case on form ${id}.`);
+					}
+				});
+			}
+		});
+		standardizedContents[id] = itemContents;
+	}
+	return standardizedContents;
+}
 
 let paths = getPaths();
 let {FormIDMap, EditorIDMap} = loadRecordList(paths.recListPath);
@@ -630,12 +739,15 @@ let cdfRules = loadContainerDistributionFramework(paths.cdfPath, FormIDMap, Edit
 if(cdfRules !== undefined) applyCDFAddToContainers(FormIDMap, formContents, cdfRules);
 let broadIOI = itemsOfInterest;
 if(cdfRules !== undefined) broadIOI = getItemsOfInterestCDF(itemsOfInterest, cdfRules);
-let inventoryDependencies = getInventoryDependencies(InvRefIDs.map(id => ReferenceDataMap[id].baseForm.formID), FormIDMap, formContents);
+let inventoryDependencies = getInventoryDependencies(ReferenceIDs.map(id => ReferenceDataMap[id].baseForm.formID), FormIDMap, formContents);
 let calcOrder = resolveCalcOrder(inventoryDependencies);
 
 let itemsThatCanContainSigils = getAllFormsContainingItems(broadIOI, FormIDMap, formContents, calcOrder);
+let refsThatCanContainSigils = Object.values(ReferenceDataMap).filter(v => itemsThatCanContainSigils.includes(v.baseID));
+let simpleContents = standardizeContents(itemsThatCanContainSigils, FormIDMap, formContents);
 
 //filter baseids to only items that can contain IOI
 //log those, then forecast
 //container flags?
 //TODO: see applyCDFAddToContainers
+//TODO: container flags for CDF
