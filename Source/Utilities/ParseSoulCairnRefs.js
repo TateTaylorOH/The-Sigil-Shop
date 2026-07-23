@@ -518,9 +518,9 @@ function getInventoryDependencies(baseIDs, FormIDMap, contentsMap){
 	let initialDependencies = baseIDs.filter(isFirstOccurrence);
 	let requiredDependencies = initialDependencies, missingDependencies = initialDependencies;
 	let pass = 0, n = missingDependencies.length;
+	console.log(`Dependency pass 1: Evaluating inventory dependencies for ${n} forms.`);
 	while(n > 0){
 		pass++;
-		if(pass === 1) console.log(`Dependency pass ${pass}: Evaluating inventory dependencies for ${n} forms.`);
 		for(let i = 0; i < n; i++){
 			let id = missingDependencies[i], baseForm = FormIDMap[id], sig = baseForm.signature;
 			let dependencies = getSingleRecDependencies(id, sig, contentsMap);
@@ -530,7 +530,7 @@ function getInventoryDependencies(baseIDs, FormIDMap, contentsMap){
 			}
 			console.log(`(${i+1}/${n}) Failed to get dependencies of form ${id}.`);
 			Object.entries(baseForm).forEach(v => console.log(`${v[0]}: ${v[1]}`));
-			throw new Error(`Handle depedencies of form ${id} to continue.`);
+			throw new Error(`Handle dependencies of form ${id} to continue.`);
 		}
 		requiredDependencies = initialDependencies.concat(Object.values(inventoryDependencies))
 			.filter(v => v !== null).flat().filter(isFirstOccurrence).sort();
@@ -540,6 +540,38 @@ function getInventoryDependencies(baseIDs, FormIDMap, contentsMap){
 	}
 	console.log(`Identified dependencies for ${Object.keys(inventoryDependencies).length} forms.`);
 	return inventoryDependencies;
+}
+function resolveCalcOrder(dependencies){
+	let dependencyList = Object.assign({}, dependencies);
+	let ids = Object.keys(dependencyList).sort();
+	ids.filter(id => typeof dependencyList[id] === 'object' && Array.isArray(dependencyList[id])).forEach(id => dependencyList[id] = dependencyList[id].map(v => v));
+	let calcOrder = [];
+	let pass = 0;
+	console.log(`Calc. order: Evaluating calculation order for ${ids.length} forms.`);
+	while(ids.length > 0){
+		pass++;
+		let nullIDs = ids.filter(id => dependencyList[id] === null);
+		calcOrder = calcOrder.concat(nullIDs);
+		nullIDs.forEach(k => delete dependencyList[k]);
+		ids = Object.keys(dependencyList).sort();
+		ids.forEach(id => {
+			let dependencies = dependencyList[id];
+			if(typeof dependencies === 'object' && Array.isArray(dependencies)){
+				let remainingDependencies = dependencies.filter(v => !calcOrder.includes(v));
+				if(remainingDependencies.length === 0) remainingDependencies = null;
+				dependencyList[id] = remainingDependencies;
+				return;
+			}
+			if(typeof dependencies === 'string') {
+				if(calcOrder.includes(dependencies)) dependencyList[id] = null;
+				return;
+			}
+			throw new Error(`Calc. order: Unhandled dependency case for form ${id}.`);
+		});
+		if(nullIDs.length === 0) throw new Error(`Could not sort these ids: ${ids.join(', ')}`);
+		console.log(`Calc. order pass ${pass}: Sorted ${nullIDs.length} ids. ${ids.length} remain.`);
+	}
+	return calcOrder;
 }
 
 let paths = getPaths();
@@ -555,37 +587,7 @@ if(cdfRules !== undefined) applyCDFAddToContainers(FormIDMap, formContents, cdfR
 let broadIOI = itemsOfInterest;
 if(cdfRules !== undefined) broadIOI = getItemsOfInterestCDF(itemsOfInterest, cdfRules);
 let inventoryDependencies = getInventoryDependencies(InvRefIDs.map(id => ReferenceDataMap[id].baseForm.formID), FormIDMap, formContents);
-
-function resolveCalcOrder(ids){
-	let calcOrder = [];
-	let dependencyList = Object.assign({}, inventoryDependencies);
-	let pass = 0;
-	while(ids.length > 0){
-		pass++;
-		let nullIDs = ids.filter(id => dependencyList[id] === null);
-		calcOrder = calcOrder.concat(nullIDs);
-		nullIDs.forEach(k => delete dependencyList[k]);
-		ids = Object.keys(dependencyList);
-		ids.forEach(id => {
-			let dependencies = dependencyList[id];
-			if(typeof dependencies === 'string'){
-				if(calcOrder.includes(dependencies)) dependencyList[id] = null;
-			}
-			if(typeof dependencies === 'object' && Array.isArray(dependencies)){
-				let remDeps = dependencies.filter(did => !calcOrder.includes(did));
-				if(remDeps.length === 0) {
-					dependencyList[id] = null;
-					return;
-				}
-				dependencyList[id] = remDeps;
-			}
-		});
-		if(nullIDs.length === 0) throw new Error(`Could not sort these ids: ${ids.join(', ')}`);
-		console.log(`Pass ${pass}: Sorted ${nullIDs.length} ids. ${ids.length} remain.`);
-	}
-	return calcOrder;
-}
-let calcOrder = resolveCalcOrder(Object.keys(inventoryDependencies));
+let calcOrder = resolveCalcOrder(inventoryDependencies);
 
 let itemCanContainIOI = {};
 function getCanContainIOI(id, signature){
